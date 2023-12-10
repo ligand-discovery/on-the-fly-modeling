@@ -1,10 +1,14 @@
 import os
 import sys
 import streamlit as st
+import random
 import pandas as pd
 import joblib
 import numpy as np
 from rdkit import Chem
+from rdkit.Chem import Draw
+from rdkit.Chem import AllChem
+import networkx as nx
 
 st.set_page_config(layout="wide")
 
@@ -21,6 +25,33 @@ CRF_PATTERN = "CC1(CCC#C)N=N1"
 CRF_PATTERN_0 = "C#CC"
 CRF_PATTERN_1 = "N=N"
 
+SIMILARITY_PROTEINS_CUT = 0.2
+
+
+@st.cache_data()
+def get_protein_similarity_graph():
+    edgelist = pd.read_csv(os.path.join(root, "..", "data", "edgelist.csv"))
+    G = nx.Graph()
+    for v in edgelist.values:
+        if v[-1] < SIMILARITY_PROTEINS_CUT:
+            continue
+        G.add_edge(v[0], v[1])
+    return G
+
+
+@st.cache_data()
+def get_clusters_for_modeling(uniprot_acs):
+    sg = proteins_graph.subgraph(uniprot_acs)
+    clusters = []
+    for uniprot_ac in uniprot_acs:
+        if uniprot_ac not in sg.nodes():
+            clusters += [uniprot_ac]
+    for prot_clust in nx.connected_components(sg):
+        clusters += [tuple(sorted(prot_clust))]
+    clusters = set(clusters)
+    clusters = sorted(clusters, key=lambda x: -len(x))
+    return clusters
+
 
 @st.cache_data()
 def load_hits():
@@ -28,6 +59,15 @@ def load_hits():
         os.path.join(root, "..", "data", "hits.joblib")
     )
     return hits, fid_prom, pid_prom
+
+
+@st.cache_data()
+def load_fid2smi():
+    d = pd.read_csv(os.path.join(root, "..", "data", "cemm_smiles.csv"))
+    fid2smi = {}
+    for v in d.values:
+        fid2smi[v[0]] = v[1]
+    return fid2smi
 
 
 @st.cache_data()
@@ -84,17 +124,29 @@ def has_crf(mol):
     return True
 
 
+def get_fragment_image(smiles):
+    m = Chem.MolFromSmiles(smiles)
+    AllChem.Compute2DCoords(m)
+    opts = Draw.DrawingOptions()
+    opts.bgColor = None
+    im = Draw.MolToImage(m, size=(200, 200), options=opts)
+    return im
+
+
 # App code
 
 hits, fid_prom, pid_prom = load_hits()
 pid2name, name2pid, any2pid = pid2name_mapper()
+fid2smi = load_fid2smi()
+proteins_graph = get_protein_similarity_graph()
+
 
 st.title("On-the-Fly Modeling from Ligand Discovery")
 st.write(
     "Welcome to the On-the-Fly Modeling tool! Select your proteins of interest and we'll build a quick ML model."
 )
 
-cols = st.columns([1, 1, 1])
+cols = st.columns([1, 1, 2])
 
 col = cols[0]
 
@@ -110,6 +162,7 @@ for it in input_tokens:
             input_pids += [any2pid[it]]
 
 input_data = pids_to_dataframe(input_pids)
+
 
 if input_data.shape[0] == 0:
     has_input = False
@@ -129,31 +182,53 @@ if has_input:
         )
     )
 
-    col.dataframe(input_data)
+    col.dataframe(input_data, hide_index=True)
 
     col = cols[1]
 
     col.subheader(":robot_face: Quick modeling")
 
-    type_of_modeling = col.radio(
-        "What king of modeling do yo want?", options=["Aggregated", "Any"]
+    clusters_of_proteins = get_clusters_for_modeling(list(input_data["UniprotAC"]))
+
+    options = []
+    for prot_clust in clusters_of_proteins:
+        options += [", ".join(sorted([pid2name[pid] for pid in prot_clust]))]
+
+    selected_cluster = col.radio(
+        "These are some suggested groups of proteins for modeling", options=options
     )
 
-    if type_of_modeling == "Aggregated":
-        aggregate = True
-    else:
-        aggregate = False
+    selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
 
     model = OnTheFlyModel()
-    uniprot_acs = list(input_data["UniprotAC"])
+    uniprot_acs = list(selected_cluster)
     model = OnTheFlyModel()
     is_fitted = False
+
     data = model.prepare_classification(uniprot_acs)
+
     auroc = model.estimate_performance(data["y"])
 
-    col.metric("Number of positives", value=np.sum(data["y"]))
     col.metric(
-        "Quick AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
+        "Number of positives in the Ligand Discovery dataset", value=np.sum(data["y"])
+    )
+
+    expander = col.expander("View positives")
+    positives_data = data[data["y"] == 1]
+    pos_fids = sorted(positives_data["fid"])
+    pos_smis = [fid2smi[fid] for fid in pos_fids]
+    expander.dataframe(
+        pd.DataFrame({"FragmentID": pos_fids, "SMILES": pos_smis}), hide_index=True
+    )
+    expander = col.expander("View negatives")
+    negatives_data = data[data["y"] == 0]
+    neg_fids = sorted(negatives_data["fid"])
+    neg_smis = [fid2smi[fid] for fid in neg_fids]
+    expander.dataframe(
+        pd.DataFrame({"FragmentID": neg_fids, "SMILES": neg_smis}), hide_index=True
+    )
+    col.metric(
+        "Rough AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
     )
 
     model.fit(data["y"])
@@ -171,16 +246,16 @@ if has_input:
 
         pred_tokens = [t for t in input_prediction_tokens.split("\n") if t != ""]
 
-        valid_smiles = []
+        smiles_list = []
         for token in pred_tokens:
             if not is_valid_smiles(token):
                 continue
             smi = token
             if not has_crf(Chem.MolFromSmiles(smi)):
                 continue
-            valid_smiles = smi
+            smiles_list += [smi]
 
-        if len(valid_smiles) == 0:
+        if len(smiles_list) == 0:
             has_prediction_input = False
             if len(pred_tokens) > 0:
                 col.warning(
@@ -192,4 +267,15 @@ if has_input:
             has_prediction_input = True
 
         if has_prediction_input:
-            model.predict(valid_smiles)
+            col.info(
+                "{0} out of {1} input molecules are valid".format(
+                    len(smiles_list), len(pred_tokens)
+                )
+            )
+            y_hat = model.predict_proba(smiles_list)[:, 1]
+            dr = pd.DataFrame({"SMILES": smiles_list, "Score": y_hat})
+            for v in dr.values:
+                expander = col.expander(
+                    "Score: `{0:.3f}` | SMILES: `{1}`".format(v[1], v[0])
+                )
+                expander.image(get_fragment_image(v[0]))

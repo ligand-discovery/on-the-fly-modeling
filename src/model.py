@@ -6,6 +6,9 @@ import collections
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score
 from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier
+from tabpfn import TabPFNClassifier
+from lol import LOL
 
 from fragmentembedding import FragmentEmbedder
 
@@ -16,13 +19,36 @@ fids, _, precalc_embeddings = joblib.load(os.path.join(DATA_PATH, "cemm_emb.jobl
 hits, fid_prom, pid_prom = joblib.load(os.path.join(DATA_PATH, "hits.joblib"))
 
 
+tabpfn_model = TabPFNClassifier(N_ensemble_configurations=32)
+
+
+class LigandDiscoveryClassifier(object):
+    def __init__(self):
+        tabpfn_model.remove_models_from_memory()
+
+    def fit(self, X, y):
+        self.reducer = LOL(n_components=100)
+        X = self.reducer.fit_transform(X, y)
+        tabpfn_model.fit(X, y)
+
+    def predict_proba(self, X):
+        X = self.reducer.transform(X)
+        y_hat = tabpfn_model.predict_proba(X)
+        return y_hat
+
+    def predict(self, X):
+        X = self.reducer.transform(X)
+        y_hat = tabpfn_model.predict(X)
+        return y_hat
+
+
 class OnTheFlyModel(object):
     def __init__(self):
         self.fragment_embedder = fragment_embedder
         self.precalc_embeddings = precalc_embeddings
         self.baseline_classifier = GaussianNB()
-        # self.classifier = LigandDiscoveryClassifier()
-        self.classifier = GaussianNB()
+        # self.baseline_classifier = LigandDiscoveryClassifier()
+        self.classifier = LigandDiscoveryClassifier()
         self.fids = fids
         self._valid_prots = set(pid_prom.keys())
         self._fid_prom = []
@@ -82,7 +108,12 @@ class OnTheFlyModel(object):
         y = np.array(y)
         self.classifier.fit(self.precalc_embeddings, y)
 
-    def predict(self, smiles_list):
+    def predict_proba(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
         y_hat = self.classifier.predict_proba(X)
+        return y_hat
+
+    def predict(self, smiles_list):
+        X = fragment_embedder.transform(smiles_list)
+        y_hat = self.classifier.predict(X)
         return y_hat

@@ -16,26 +16,12 @@ fids, _, precalc_embeddings = joblib.load(os.path.join(DATA_PATH, "cemm_emb.jobl
 hits, fid_prom, pid_prom = joblib.load(os.path.join(DATA_PATH, "hits.joblib"))
 
 
-
-class LigandDiscoveryClassifier():
-
-    def __init__(self):
-        pass
-
-    def fit(self, X, y):
-        pass
-
-    def predict_proba(self, X):
-        pass
-
-
 class OnTheFlyModel(object):
-
     def __init__(self):
         self.fragment_embedder = fragment_embedder
         self.precalc_embeddings = precalc_embeddings
         self.baseline_classifier = GaussianNB()
-        #self.classifier = LigandDiscoveryClassifier()
+        # self.classifier = LigandDiscoveryClassifier()
         self.classifier = GaussianNB()
         self.fids = fids
         self._valid_prots = set(pid_prom.keys())
@@ -49,7 +35,9 @@ class OnTheFlyModel(object):
     def _check_prots(self, uniprot_acs):
         for pid in uniprot_acs:
             if pid not in self._valid_prots:
-                raise Exception("{0} protein is not amongst our screening hits".format(pid))
+                raise Exception(
+                    "{0} protein is not amongst our screening hits".format(pid)
+                )
 
     def prepare_classification(self, uniprot_acs):
         self._check_prots(uniprot_acs)
@@ -70,12 +58,7 @@ class OnTheFlyModel(object):
                 y += [1]
             else:
                 y += [0]
-        data = {
-            "fid": self.fids,
-            "prom": self._fid_prom,
-            "hits": my_hits,
-            "y": y
-        }
+        data = {"fid": self.fids, "prom": self._fid_prom, "hits": my_hits, "y": y}
         data = pd.DataFrame(data)
         return data
 
@@ -89,27 +72,17 @@ class OnTheFlyModel(object):
             y_train = y[train_idx]
             y_test = y[test_idx]
             self.baseline_classifier.fit(X_train, y_train)
-            y_hat = self.baseline_classifier.predict_proba(X_test)[:,1]
+            y_hat = self.baseline_classifier.predict_proba(X_test)[:, 1]
             auroc = roc_auc_score(y_test, y_hat)
             print(auroc)
             aurocs += [auroc]
         return np.mean(aurocs), np.std(aurocs)
 
-    def fit(self, uniprot_acs):
-        self._check_prots(uniprot_acs)
+    def fit(self, y):
+        y = np.array(y)
+        self.classifier.fit(self.precalc_embeddings, y)
 
     def predict(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
         y_hat = self.classifier.predict_proba(X)
         return y_hat
-
-
-if __name__ == "__main__":
-    uniprot_acs = ["P49721"]
-    model = OnTheFlyModel()
-    result = model.prepare_classification(uniprot_acs)
-    auroc = model.estimate_performance(result["y"])
-    print(result)
-    print(auroc)
-
-        

@@ -47,7 +47,6 @@ class OnTheFlyModel(object):
         self.fragment_embedder = fragment_embedder
         self.precalc_embeddings = precalc_embeddings
         self.baseline_classifier = GaussianNB()
-        # self.baseline_classifier = LigandDiscoveryClassifier()
         self.classifier = LigandDiscoveryClassifier()
         self.fids = fids
         self._valid_prots = set(pid_prom.keys())

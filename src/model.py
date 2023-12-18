@@ -24,7 +24,7 @@ catalog_ids, _, precalc_embeddings_reference = joblib.load(
 hits, fid_prom, pid_prom = joblib.load(os.path.join(DATA_PATH, "hits.joblib"))
 
 
-tabpfn_model = TabPFNClassifier(N_ensemble_configurations=32)
+tabpfn_model = TabPFNClassifier(device="cpu", N_ensemble_configurations=32)
 
 
 class LigandDiscoveryBaselineClassifier(object):

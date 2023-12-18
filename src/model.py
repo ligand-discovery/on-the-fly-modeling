@@ -175,6 +175,18 @@ class OnTheFlyModel(object):
         except:
             return None, None
 
+    def estimate_performance_on_train(self, y, baseline=True):
+        y = np.array(y)
+        X = self.precalc_embeddings
+        if baseline:
+            self.baseline_classifier.fit(X, y)
+            y_hat = self.baseline_classifier.predict_proba(X)[:, 1]
+        else:
+            y_hat = self.classifier.fit(X, y)
+            y_hat = self.classifier.predict_proba(X)[:, 1]
+        auroc = roc_auc_score(y, y_hat)
+        return auroc
+
     def fit(self, y):
         y = np.array(y)
         self.classifier.fit(self.precalc_embeddings, y)

@@ -12,6 +12,7 @@ RUN python -m pip install lolP==0.0.4
 RUN python -m pip install rdkit
 RUN python -m pip install streamlit
 RUN python -m pip install networkx
+RUN python -m pip install python-louvain
 RUN echo "Components installation done"
 RUN git clone https://github.com/ligand-discovery/fragment-embedding.git
 RUN python -m pip install -e fragment-embedding/.

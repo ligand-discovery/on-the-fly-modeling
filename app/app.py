@@ -2,12 +2,14 @@ import os
 import sys
 import streamlit as st
 import pandas as pd
+import collections
 import joblib
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Draw
 from rdkit.Chem import AllChem
 from rdkit import RDLogger
+import community as community_louvain
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -28,29 +30,65 @@ CRF_PATTERN = "CC1(CCC#C)N=N1"
 CRF_PATTERN_0 = "C#CC"
 CRF_PATTERN_1 = "N=N"
 
-SIMILARITY_PROTEINS_CUT = 0.2
+
+SIMILARITY_PERCENTILES = [95, 90]
 
 
 @st.cache_data()
-def get_protein_similarity_graph():
-    edgelist = pd.read_csv(os.path.join(root, "..", "data", "edgelist.csv"))
-    G = nx.Graph()
-    for v in edgelist.values:
-        if v[-1] < SIMILARITY_PROTEINS_CUT:
-            continue
-        G.add_edge(v[0], v[1])
-    return G
+def load_protein_spearman_similarity_matrix():
+    uniprot_acs, M = joblib.load(
+        os.path.join(root, "..", "data", "protein_protein_spearman_correlations.joblib")
+    )
+    values = np.triu(M, k=1).ravel()
+    cutoffs = [np.percentile(values, p) for p in SIMILARITY_PERCENTILES]
+    return uniprot_acs, M, cutoffs
+
+
+@st.cache_data()
+def load_protein_hit_similarity_matrix():
+    uniprot_acs, M = joblib.load(
+        os.path.join(root, "..", "data", "protein_protein_hit_cosines.joblib")
+    )
+    values = np.triu(M, k=1).ravel()
+    cutoffs = [np.percentile(values, p) for p in SIMILARITY_PERCENTILES]
+    return uniprot_acs, M, cutoffs
+
+
+global_uniprot_acs_0, M0, cutoffs_0 = load_protein_spearman_similarity_matrix()
+global_uniprot_acs_1, M1, cutoffs_1 = load_protein_hit_similarity_matrix()
 
 
 @st.cache_data()
 def get_clusters_for_modeling(uniprot_acs):
-    sg = proteins_graph.subgraph(uniprot_acs)
-    clusters = []
-    for uniprot_ac in uniprot_acs:
-        if uniprot_ac not in sg.nodes():
-            clusters += [uniprot_ac]
-    for prot_clust in nx.connected_components(sg):
-        clusters += [tuple(sorted(prot_clust))]
+    G = nx.Graph()
+    G.add_nodes_from(uniprot_acs)
+    pid2idx_0 = dict((k, i) for i, k in enumerate(global_uniprot_acs_0))
+    pid2idx_1 = dict((k, i) for i, k in enumerate(global_uniprot_acs_1))
+    for i, pid_0 in enumerate(uniprot_acs):
+        for j, pid_1 in enumerate(uniprot_acs):
+            if i >= j:
+                continue
+            v = M0[pid2idx_0[pid_0], pid2idx_0[pid_1]]
+            for cutoff in cutoffs_0:
+                if v >= cutoff:
+                    if not G.has_edge(pid_0, pid_1):
+                        G.add_edge(pid_0, pid_1, weight=1)
+                    else:
+                        current_weight = G[pid_0][pid_1].get("weight")
+                        G[pid_0][pid_1]["weight"] = current_weight + 1
+            v = M1[pid2idx_1[pid_0], pid2idx_1[pid_1]]
+            for cutoff in cutoffs_1:
+                if v >= cutoff:
+                    if not G.has_edge(pid_0, pid_1):
+                        G.add_edge(pid_0, pid_1, weight=1)
+                    else:
+                        current_weight = G[pid_0][pid_1].get("weight")
+                        G[pid_0][pid_1]["weight"] = current_weight + 1
+    partition = community_louvain.best_partition(G)
+    clusters = collections.defaultdict(list)
+    for k, v in partition.items():
+        clusters[v] += [k]
+    clusters = [tuple(sorted(v)) for k, v in clusters.items()]
     clusters = set(clusters)
     clusters = sorted(clusters, key=lambda x: -len(x))
     return clusters
@@ -141,7 +179,6 @@ def get_fragment_image(smiles):
 hits, fid_prom, pid_prom = load_hits()
 pid2name, name2pid, any2pid = pid2name_mapper()
 fid2smi = load_fid2smi()
-proteins_graph = get_protein_similarity_graph()
 
 
 st.title("On-the-Fly Modeling from Ligand Discovery")
@@ -199,7 +236,7 @@ if has_input:
 
     type_options = ["At least one", "At least half", "All"]
     type_of_prediction = col.radio(
-        "Within a group, predict...", options=type_options, index=0, horizontal=True
+        "Within a group, predict...", options=type_options, index=1, horizontal=True
     )
     type_proportions = [0, 0.5, 1]
     type_selected_proportion = type_proportions[type_options.index(type_of_prediction)]
@@ -215,10 +252,13 @@ if has_input:
 
     selected_cluster = col.radio(
         "These are some suggested groups of proteins for modeling",
-        options=options,
+        options=options + ["Full set of proteins"],
     )
 
-    selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
+    if selected_cluster == "Full set of proteins":
+        selected_cluster = list(input_data["UniprotAC"])
+    else:
+        selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
 
     uniprot_acs = list(selected_cluster)
     model = OnTheFlyModel()

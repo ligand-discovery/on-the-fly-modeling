@@ -4,5 +4,5 @@ services:
   github:
     branch: main
     deploy_on_push: true
-    repo: ligand-discovery/on-the-fly-modeling
+    repo: ersilia-os/on-the-fly-modeling
   name: on-the-fly-modeling

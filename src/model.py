@@ -150,29 +150,6 @@ class OnTheFlyModel(object):
         ]
         return percentiles
 
-    def prepare_classification(self, uniprot_acs):
-        self._check_prots(uniprot_acs)
-        my_hits_dict = collections.defaultdict(int)
-        pids_set = set(uniprot_acs)
-        for k, _ in hits.items():
-            if k[0] in pids_set:
-                my_hits_dict[k[1]] += 1
-        my_hits = []
-        for fid in fids:
-            if fid in my_hits_dict:
-                my_hits += [my_hits_dict[fid]]
-            else:
-                my_hits += [0]
-        y = []
-        for h in my_hits:
-            if h > 0:
-                y += [1]
-            else:
-                y += [0]
-        data = {"fid": self.fids, "prom": self._fid_prom, "hits": my_hits, "y": y}
-        data = pd.DataFrame(data)
-        return data
-
     def estimate_performance(self, y, baseline=True):
         try:
             y = np.array(y)

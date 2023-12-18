@@ -1,0 +1,8 @@
+spec:
+  name: on-the-fly-modeling
+  services:
+  - dockerfile_path: Dockerfile
+    git:
+      branch: main
+      repo_clone_url: https://github.com/ligand-discovery/on-the-fly-modeling.git
+    name: on-the-fly-modeling

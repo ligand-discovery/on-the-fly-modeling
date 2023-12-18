@@ -1,13 +1,15 @@
 import os
 import sys
 import streamlit as st
-import random
 import pandas as pd
 import joblib
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Draw
 from rdkit.Chem import AllChem
+from rdkit import RDLogger 
+RDLogger.DisableLog('rdApp.*')
+
 import networkx as nx
 
 st.set_page_config(layout="wide")
@@ -146,7 +148,7 @@ st.write(
     "Welcome to the On-the-Fly Modeling tool! Select your proteins of interest and we'll build a quick ML model."
 )
 
-cols = st.columns([1, 1, 2])
+cols = st.columns([1, 1, 2.2])
 
 col = cols[0]
 
@@ -193,47 +195,72 @@ if has_input:
     options = []
     for prot_clust in clusters_of_proteins:
         options += [", ".join(sorted([pid2name[pid] for pid in prot_clust]))]
+    
+    type_options = ["At least one", "At least half", "All"]
+    type_of_prediction = col.radio("Within a group, predict...", options = type_options, index = 0, horizontal = True)
+    type_proportions = [0, 0.5, 1]
+    type_selected_proportion = type_proportions[type_options.index(type_of_prediction)]
+
+    max_hit_fragments = col.slider("Maximum number of hits per group", min_value = 10, max_value = 200, step=10, value=100, help="Fragments will be ranked by specificity, i.e. by ascending value of promiscuity.")
 
     selected_cluster = col.radio(
-        "These are some suggested groups of proteins for modeling", options=options
+        "These are some suggested groups of proteins for modeling", options=options,
     )
 
     selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
 
-    model = OnTheFlyModel()
     uniprot_acs = list(selected_cluster)
     model = OnTheFlyModel()
     is_fitted = False
 
-    data = model.prepare_classification(uniprot_acs)
+    # TODO Move hit selector to model
+    from hit_selector import HitSelector
+    hit_selector = HitSelector(uniprot_acs=uniprot_acs)
+    data = hit_selector.select(min_prop_hit_proteins=type_selected_proportion, max_hit_fragments=max_hit_fragments)
+    #data = model.prepare_classification(uniprot_acs)
 
-    auroc = model.estimate_performance(data["y"])
+    num_positives = np.sum(data["y"])
 
     col.metric(
-        "Number of positives in the Ligand Discovery dataset", value=np.sum(data["y"])
+        "Number of positives in the Ligand Discovery dataset", value=num_positives
     )
 
-    expander = col.expander("View positives")
-    positives_data = data[data["y"] == 1]
-    pos_fids = sorted(positives_data["fid"])
-    pos_smis = [fid2smi[fid] for fid in pos_fids]
-    expander.dataframe(
-        pd.DataFrame({"FragmentID": pos_fids, "SMILES": pos_smis}), hide_index=True
-    )
-    expander = col.expander("View negatives")
-    negatives_data = data[data["y"] == 0]
-    neg_fids = sorted(negatives_data["fid"])
-    neg_smis = [fid2smi[fid] for fid in neg_fids]
-    expander.dataframe(
-        pd.DataFrame({"FragmentID": neg_fids, "SMILES": neg_smis}), hide_index=True
-    )
-    col.metric(
-        "Rough AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
-    )
+    if num_positives == 0:
+        col.error("No positives available. We cannot build a model with no positive data.")
+        is_fitted = False
+    
+    else:
 
-    model.fit(data["y"])
+        expander = col.expander("View positives")
+        positives_data = data[data["y"] == 1]
+        pos_fids = sorted(positives_data["fid"])
+        pos_smis = [fid2smi[fid] for fid in pos_fids]
+        expander.dataframe(
+            pd.DataFrame({"FragmentID": pos_fids, "SMILES": pos_smis}), hide_index=True
+        )
+        expander = col.expander("View negatives")
+        negatives_data = data[data["y"] == 0]
+        neg_fids = sorted(negatives_data["fid"])
+        neg_smis = [fid2smi[fid] for fid in neg_fids]
+        expander.dataframe(
+            pd.DataFrame({"FragmentID": neg_fids, "SMILES": neg_smis}), hide_index=True
+        )
 
-    is_fitted = True
+        if num_positives < 5:
+
+            col.warning("Not enough data to estimate AUROC.")
+        
+        else:
+
+            baseline = col.checkbox(label="Fast baseline AUROC estimation", value=True)
+            auroc = model.estimate_performance(data["y"], baseline)
+
+            col.metric(
+                "AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
+            )
+        
+        model.fit(data["y"])
+        is_fitted = True
 
     if is_fitted:
         col = cols[2]
@@ -272,10 +299,20 @@ if has_input:
                     len(smiles_list), len(pred_tokens)
                 )
             )
-            y_hat = model.predict_proba(smiles_list)[:, 1]
-            dr = pd.DataFrame({"SMILES": smiles_list, "Score": y_hat})
-            for v in dr.values:
-                expander = col.expander(
-                    "Score: `{0:.3f}` | SMILES: `{1}`".format(v[1], v[0])
-                )
-                expander.image(get_fragment_image(v[0]))
+            do_tau = col.checkbox("Calculate Tau (slower)", value=False)
+            if do_tau:
+                y_hat, tau_ref, tau_train = model.predict_proba_and_tau(smiles_list)
+                dr = pd.DataFrame({"SMILES": smiles_list, "Score": y_hat, "Tau": tau_ref, "TauTrain": tau_train})
+                for v in dr.values:
+                    expander = col.expander(
+                        "Score: `{0:.3f}` | Tau: `{1:.2f}` | Tau Train: `{2:.2f}`| SMILES: `{3}`".format(v[1], v[2], v[3], v[0])
+                    )
+                    expander.image(get_fragment_image(v[0]))
+            else:
+                y_hat = model.predict_proba(smiles_list)[:,1]
+                dr = pd.DataFrame({"SMILES": smiles_list, "Score": y_hat})
+                for v in dr.values:
+                    expander = col.expander(
+                        "Score: `{0:.3f}` | SMILES: `{1}`".format(v[1], v[0])
+                    )
+                    expander.image(get_fragment_image(v[0]))

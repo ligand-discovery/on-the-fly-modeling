@@ -1,0 +1,8 @@
+name: on-the-fly-modeling
+services:
+- dockerfile_path: Dockerfile
+  github:
+    branch: main
+    deploy_on_push: true
+    repo: ligand-discovery/on-the-fly-modeling
+  name: on-the-fly-modeling

@@ -18,7 +18,9 @@ DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data
 fragment_embedder = FragmentEmbedder()
 fids, _, precalc_embeddings = joblib.load(os.path.join(DATA_PATH, "cemm_emb.joblib"))
 
-catalog_ids, _, precalc_embeddings_reference = joblib.load(os.path.join(DATA_PATH, "enamine_stock_emb.joblib"))
+catalog_ids, _, precalc_embeddings_reference = joblib.load(
+    os.path.join(DATA_PATH, "enamine_stock_emb.joblib")
+)
 hits, fid_prom, pid_prom = joblib.load(os.path.join(DATA_PATH, "hits.joblib"))
 
 
@@ -62,7 +64,6 @@ class LigandDiscoveryClassifier(object):
 
 
 class HitSelector(object):
-    
     def __init__(self, uniprot_acs):
         self._valid_prots = set(pid_prom.keys())
         self.uniprot_acs = [pid for pid in uniprot_acs if pid in self._valid_prots]
@@ -76,7 +77,7 @@ class HitSelector(object):
                 self._fid_prom += [0]
 
     def select(self, min_prop_hit_proteins=0, max_hit_fragments=100):
-        min_hit_proteins = int(min_prop_hit_proteins*len(self.uniprot_acs))
+        min_hit_proteins = int(min_prop_hit_proteins * len(self.uniprot_acs))
         print(min_hit_proteins)
         my_hits_dict = collections.defaultdict(int)
         pids_set = set(self.uniprot_acs)
@@ -101,7 +102,7 @@ class HitSelector(object):
         data = {"fid": self.fids, "prom": self._fid_prom, "hits": my_hits, "y": y}
         if np.sum(data["y"]) > max_hit_fragments:
             promiscuity_ranks = rankdata(data["prom"], method="ordinal")
-            promiscuity_ranks = promiscuity_ranks/np.max(promiscuity_ranks)
+            promiscuity_ranks = promiscuity_ranks / np.max(promiscuity_ranks)
             data_ = pd.DataFrame(data)
             data_["ranks"] = promiscuity_ranks
             data_ = data_.sort_values(by="ranks", ascending=True)
@@ -144,7 +145,9 @@ class OnTheFlyModel(object):
 
     def _calculate_percentiles(self, y, yref):
         sorted_yref = np.sort(yref)
-        percentiles = [np.searchsorted(sorted_yref, yi, side='right') / len(yref) for yi in y]
+        percentiles = [
+            np.searchsorted(sorted_yref, yi, side="right") / len(yref) for yi in y
+        ]
         return percentiles
 
     def prepare_classification(self, uniprot_acs):
@@ -187,7 +190,7 @@ class OnTheFlyModel(object):
                     y_hat = self.baseline_classifier.predict_proba(X_test)[:, 1]
                 else:
                     self.classifier.fit(X_train, y_train)
-                    y_hat = self.classifier.predict_proba(X_test)[:, 1]                
+                    y_hat = self.classifier.predict_proba(X_test)[:, 1]
                 auroc = roc_auc_score(y_test, y_hat)
                 print(auroc)
                 aurocs += [auroc]
@@ -208,13 +211,17 @@ class OnTheFlyModel(object):
         X = fragment_embedder.transform(smiles_list)
         y_hat = self.classifier.predict(X)
         return y_hat
-    
+
     def predict_proba_and_tau(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
-        y_hat = self.classifier.predict_proba(X)[:,1]
-        sample_indices = np.random.choice(self.precalc_embeddings_reference.shape[0], size=1000, replace=False)
-        reference_y_hat = self.classifier.predict_proba(self.precalc_embeddings_reference)[sample_indices,1]
-        train_y_hat = self.classifier.predict_proba(self.precalc_embeddings)[:,1]
+        y_hat = self.classifier.predict_proba(X)[:, 1]
+        sample_indices = np.random.choice(
+            self.precalc_embeddings_reference.shape[0], size=1000, replace=False
+        )
+        reference_y_hat = self.classifier.predict_proba(
+            self.precalc_embeddings_reference
+        )[sample_indices, 1]
+        train_y_hat = self.classifier.predict_proba(self.precalc_embeddings)[:, 1]
         tau_ref = self._calculate_percentiles(y_hat, reference_y_hat)
         tau_train = self._calculate_percentiles(y_hat, train_y_hat)
         return y_hat, tau_ref, tau_train

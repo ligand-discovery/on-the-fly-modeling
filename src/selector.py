@@ -17,7 +17,9 @@ def get_protein_similarity_graph():
         G.add_edge(v[0], v[1])
     return G
 
+
 proteins_graph = get_protein_similarity_graph()
+
 
 def get_clusters_for_modeling(uniprot_acs):
     sg = proteins_graph.subgraph(uniprot_acs)
@@ -30,4 +32,3 @@ def get_clusters_for_modeling(uniprot_acs):
     clusters = set(clusters)
     clusters = sorted(clusters, key=lambda x: -len(x))
     return clusters
-

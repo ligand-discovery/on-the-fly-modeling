@@ -217,7 +217,7 @@ else:
 
 if has_input:
     col.info(
-        "{0} out of {1} input proteins were found in the Ligand Discovery interactome.".format(
+        "{0} out of {1} input proteins were found in the Ligand Discovery interactome, corresponding to all statistically significant fragment-protein pairs.".format(
             len(input_pids), len(input_tokens)
         )
     )

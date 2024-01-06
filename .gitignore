@@ -1,1 +1,5 @@
 data/slc_inhibitor_collection_gsf.tsv
+results
+.DS_Store
+src/__pycache__
+*pyc

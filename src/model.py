@@ -11,6 +11,7 @@ from sklearn.naive_bayes import GaussianNB as BaselineClassifier
 from tabpfn import TabPFNClassifier
 from lol import LOL
 
+
 from fragmentembedding import FragmentEmbedder
 
 DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
@@ -78,7 +79,6 @@ class HitSelector(object):
 
     def select(self, min_prop_hit_proteins=0, max_hit_fragments=100):
         min_hit_proteins = int(min_prop_hit_proteins * len(self.uniprot_acs))
-        print(min_hit_proteins)
         my_hits_dict = collections.defaultdict(int)
         pids_set = set(self.uniprot_acs)
         for k, _ in hits.items():
@@ -155,7 +155,7 @@ class OnTheFlyModel(object):
             y = np.array(y)
             if np.sum(y) < 2:
                 return None, None
-            skf = StratifiedShuffleSplit(n_splits=10, test_size=0.2)
+            skf = StratifiedShuffleSplit(n_splits=10, test_size=0.2, seed=42)
             aurocs = []
             for train_idx, test_idx in skf.split(self.precalc_embeddings, y):
                 X_train = self.precalc_embeddings[train_idx]
@@ -205,7 +205,7 @@ class OnTheFlyModel(object):
         X = fragment_embedder.transform(smiles_list)
         y_hat = self.classifier.predict_proba(X)[:, 1]
         sample_indices = np.random.choice(
-            self.precalc_embeddings_reference.shape[0], size=1000, replace=False
+            self.precalc_embeddings_reference.shape[0], size=1000, replace=False 
         )
         reference_y_hat = self.classifier.predict_proba(
             self.precalc_embeddings_reference

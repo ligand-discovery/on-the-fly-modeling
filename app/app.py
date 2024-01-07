@@ -304,7 +304,25 @@ if has_input:
         else:
             baseline = col.checkbox(label="Fast baseline AUROC estimation", value=True)
             auroc = model.estimate_performance(data["y"], baseline)
-
+            
+            do_plots = False
+            if do_plots:
+                import matplotlib.pyplot as plt
+                from sklearn.metrics import roc_curve
+                model.fit_on_train(data["y"])
+                y_hat_train = model.predict_proba_on_train()[:,1]
+                cols_ = st.columns(3)
+                fig, ax = plt.subplots(figsize=(5,5))
+                ax.hist(y_hat_train)
+                cols_[0].pyplot(fig)
+                fpr, tpr, _ = roc_curve(data["y"], y_hat_train)
+                fig, ax = plt.subplots(figsize=(5,5))
+                ax.plot(fpr, tpr)
+                cols_[1].pyplot(fig)
+                y_hat_train = model.predict_proba([v for k,v in fid2smi.items()])[:,1]
+                fig, ax = plt.subplots(figsize=(5,5))
+                ax.hist(y_hat_train)
+                cols_[2].pyplot(fig)
             col.metric(
                 "AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
             )

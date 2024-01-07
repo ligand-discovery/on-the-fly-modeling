@@ -2,12 +2,14 @@ import os
 import pandas as pd
 import joblib
 import numpy as np
+import random
 import collections
 from scipy.stats import median_abs_deviation
 from scipy.stats import rankdata
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import roc_auc_score
 from sklearn.naive_bayes import GaussianNB as BaselineClassifier
+from sklearn.neighbors import NearestNeighbors
 from tabpfn import TabPFNClassifier
 from lol import LOL
 
@@ -28,6 +30,59 @@ hits, fid_prom, pid_prom = joblib.load(os.path.join(DATA_PATH, "hits.joblib"))
 tabpfn_model = TabPFNClassifier(device="cpu", N_ensemble_configurations=32)
 
 
+class BinaryBalancer(object):
+    def __init__(self, proportion=0.3, n_samples=1000, smote=True):
+        self.proportion = proportion
+        self.n_samples = n_samples
+        self.smote = smote
+
+    def _resample(self, X, size, weights):
+        idxs = [i for i in range(X.shape[0])]
+        sampled_idxs = np.random.choice(idxs, size=(size - X.shape[0]), replace=True, p=weights)
+        X_s = X[sampled_idxs]
+        if self.smote:
+            nn = NearestNeighbors(n_neighbors=4)
+            nn.fit(X)
+            neighs = nn.kneighbors(X_s, return_distance=False)[:, 1:]
+            R = []
+            w = np.array([0.75, 0.5, 0.25])
+            w /= w.sum()
+            for i in range(X_s.shape[0]):
+                gap = random.random()
+                j = int(np.random.choice([0, 1, 2], p=w))
+                neigh_idx = neighs[i,j]
+                d = X[neigh_idx] - X_s[i]
+                R += [X_s[i] + gap*d]
+            X_s = np.array(R)
+        X = np.vstack([X, X_s])
+        return X
+
+    def transform(self, X, y, sample_weights=None):
+        X = np.array(X)
+        y = np.array(y)
+        X_0 = X[y == 0]
+        X_1 = X[y == 1]
+        num_0_samples = int(self.n_samples*(1 - self.proportion))
+        num_1_samples = int(self.n_samples*self.proportion)
+        if sample_weights is None:
+            sample_weights = np.array([1.]*X.shape[0])
+        else:
+            sample_weights = np.array(sample_weights)
+        weights_0 = sample_weights[y == 0]
+        weights_1 = sample_weights[y == 1]
+        weights_0 = weights_0 / weights_0.sum()
+        weights_1 = weights_1 / weights_1.sum()
+        X_0 = self._resample(X_0, num_0_samples, weights_0)
+        X_1 = self._resample(X_1, num_1_samples, weights_1)
+        X = np.vstack([X_0, X_1])
+        y = np.array([0]*X_0.shape[0] + [1]*X_1.shape[0])
+        idxs = [i for i in range(len(y))]
+        random.shuffle(idxs)
+        X = X[idxs]
+        y = y[idxs]
+        return X, y
+
+
 class LigandDiscoveryBaselineClassifier(object):
     def __init__(self):
         self.model = BaselineClassifier()
@@ -44,22 +99,68 @@ class LigandDiscoveryBaselineClassifier(object):
         return y_hat
 
 
+class BaselineClassifierReducer(object):
+    def __init__(self):
+        self.top_cuts = [50, 100, 250, 500]
+
+    def fit(self, X, y, promiscuity_counts):
+        self.baseline_classifiers = [LigandDiscoveryBaselineClassifier() for _ in range(len(self.top_cuts))]
+        for i, top_cut in enumerate(self.top_cuts):
+            idxs = []
+            for j, pc in enumerate(promiscuity_counts):
+                if pc > top_cut:
+                    continue
+                idxs += [j]
+            X_ = X[idxs]
+            y_ = y[idxs]
+            print(np.sum(y_), len(idxs))
+            if np.sum(y_) > 0:
+                self.baseline_classifiers[i].fit(X_, y_)
+            else:
+                self.baseline_classifiers[i] = None
+
+    def transform(self, X):
+        R = []
+        for model in self.baseline_classifiers:
+            if model is None:
+                y_hat = [0]*X.shape[0]
+            else:
+                y_hat = list(model.predict_proba(X)[:,1])
+            R += [y_hat]
+        X = np.array(R).T
+        print(X.shape)
+        return X
+    
+    def fit_transform(self, X, y, promiscuity_counts):
+        self.fit(X, y, promiscuity_counts)
+        return self.transform(X)
+
+
 class LigandDiscoveryClassifier(object):
     def __init__(self):
         tabpfn_model.remove_models_from_memory()
+        self.reducer_0 = LOL(n_components=5)
+        self.reducer_1 = BaselineClassifierReducer()
+        self.balancer = BinaryBalancer(0.5)
 
-    def fit(self, X, y):
-        self.reducer = LOL(n_components=100)
-        X = self.reducer.fit_transform(X, y)
+    def fit(self, X, y, promiscuity_counts):
+        X_0 = self.reducer_0.fit_transform(X, y)
+        X_1 = self.reducer_1.fit_transform(X, y, promiscuity_counts)
+        X = np.hstack([X_0, X_1])
+        X, y = self.balancer.transform(X, y)
         tabpfn_model.fit(X, y)
 
     def predict_proba(self, X):
-        X = self.reducer.transform(X)
+        X_0 = self.reducer_0.transform(X)
+        X_1 = self.reducer_1.transform(X)
+        X = np.hstack([X_0, X_1])
         y_hat = tabpfn_model.predict_proba(X)
         return y_hat
 
     def predict(self, X):
-        X = self.reducer.transform(X)
+        X_0 = self.reducer_0.transform(X)
+        X_1 = self.reducer_1.transform(X)
+        X = np.hstack([X_0, X_1])
         y_hat = tabpfn_model.predict(X)
         return y_hat
 
@@ -153,26 +254,31 @@ class OnTheFlyModel(object):
     def estimate_performance(self, y, baseline=True):
         try:
             y = np.array(y)
+            promiscuity_counts = np.array(self._fid_prom)
             if np.sum(y) < 2:
+                print("Not enough positives data")
                 return None, None
-            skf = StratifiedShuffleSplit(n_splits=10, test_size=0.2, seed=42)
+            skf = StratifiedShuffleSplit(n_splits=10, test_size=0.2, random_state=42)
             aurocs = []
+            print(aurocs)
             for train_idx, test_idx in skf.split(self.precalc_embeddings, y):
                 X_train = self.precalc_embeddings[train_idx]
                 X_test = self.precalc_embeddings[test_idx]
+                prom_counts_train = promiscuity_counts[train_idx]
                 y_train = y[train_idx]
                 y_test = y[test_idx]
                 if baseline:
                     self.baseline_classifier.fit(X_train, y_train)
                     y_hat = self.baseline_classifier.predict_proba(X_test)[:, 1]
                 else:
-                    self.classifier.fit(X_train, y_train)
+                    self.classifier.fit(X_train, y_train, prom_counts_train)
                     y_hat = self.classifier.predict_proba(X_test)[:, 1]
                 auroc = roc_auc_score(y_test, y_hat)
                 print(auroc)
                 aurocs += [auroc]
             return np.median(aurocs), median_abs_deviation(aurocs)
-        except:
+        except Exception as e:
+            print("AUROC estimation went wrong", e)
             return None, None
 
     def estimate_performance_on_train(self, y, baseline=True):
@@ -182,14 +288,14 @@ class OnTheFlyModel(object):
             self.baseline_classifier.fit(X, y)
             y_hat = self.baseline_classifier.predict_proba(X)[:, 1]
         else:
-            y_hat = self.classifier.fit(X, y)
+            y_hat = self.classifier.fit(X, y, self._fid_prom)
             y_hat = self.classifier.predict_proba(X)[:, 1]
         auroc = roc_auc_score(y, y_hat)
         return auroc
 
     def fit(self, y):
         y = np.array(y)
-        self.classifier.fit(self.precalc_embeddings, y)
+        self.classifier.fit(self.precalc_embeddings, y, self._fid_prom)
 
     def predict_proba(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
@@ -199,6 +305,14 @@ class OnTheFlyModel(object):
     def predict(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
         y_hat = self.classifier.predict(X)
+        return y_hat
+    
+    def predict_proba_on_train(self):
+        y_hat = self.classifier.predict_proba(self.precalc_embeddings)
+        return y_hat
+    
+    def predict_on_train(self):
+        y_hat = self.classifier.predict(self.precalc_embeddings)
         return y_hat
 
     def predict_proba_and_tau(self, smiles_list):

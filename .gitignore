@@ -1,4 +1,5 @@
 data/slc_inhibitor_collection_gsf.tsv
+data/protein_precalcs_baseline.joblib
 results
 .DS_Store
 src/__pycache__

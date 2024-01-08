@@ -302,7 +302,8 @@ if has_input:
             col.warning("Not enough data to estimate AUROC.")
 
         else:
-            baseline = col.checkbox(label="Fast baseline AUROC estimation", value=True)
+            #baseline = col.checkbox(label="Fast baseline AUROC estimation", value=True)
+            baseline = True
             auroc = model.estimate_performance(data["y"], baseline)
             
             do_plots = False
@@ -367,7 +368,8 @@ if has_input:
                     len(smiles_list), len(pred_tokens)
                 )
             )
-            do_tau = col.checkbox("Calculate Tau (slower)", value=False)
+            # do_tau = col.checkbox("Calculate Tau (slower)", value=False)
+            do_tau = False
             if do_tau:
                 y_hat, tau_ref, tau_train = model.predict_proba_and_tau(smiles_list)
                 dr = pd.DataFrame(

@@ -9,7 +9,7 @@ from scipy.stats import rankdata
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import roc_auc_score
 from sklearn.naive_bayes import GaussianNB as BaselineClassifier
-from sklearn.neighbors import NearestNeighbors
+from sklearn.neighbors import NearestNeighbors, KNeighborsRegressor
 from tabpfn import TabPFNClassifier
 from lol import LOL
 
@@ -31,7 +31,7 @@ tabpfn_model = TabPFNClassifier(device="cpu", N_ensemble_configurations=32)
 
 
 class BinaryBalancer(object):
-    def __init__(self, proportion=0.3, n_samples=1000, smote=True):
+    def __init__(self, proportion=0.5, n_samples=1000, smote=True):
         self.proportion = proportion
         self.n_samples = n_samples
         self.smote = smote
@@ -41,7 +41,7 @@ class BinaryBalancer(object):
         sampled_idxs = np.random.choice(idxs, size=(size - X.shape[0]), replace=True, p=weights)
         X_s = X[sampled_idxs]
         if self.smote:
-            nn = NearestNeighbors(n_neighbors=4)
+            nn = NearestNeighbors(n_neighbors=min(X_s.shape[0], 4))
             nn.fit(X)
             neighs = nn.kneighbors(X_s, return_distance=False)[:, 1:]
             R = []
@@ -57,7 +57,12 @@ class BinaryBalancer(object):
         X = np.vstack([X, X_s])
         return X
 
-    def transform(self, X, y, sample_weights=None):
+    def transform(self, X, y, promiscuity_counts):
+        if promiscuity_counts is None:
+            sample_weights = None
+        else:
+            promiscuity_counts = np.clip(promiscuity_counts, 10, 500)
+            sample_weights = [1/p for p in promiscuity_counts]
         X = np.array(X)
         y = np.array(y)
         X_0 = X[y == 0]
@@ -113,22 +118,23 @@ class BaselineClassifierReducer(object):
                 idxs += [j]
             X_ = X[idxs]
             y_ = y[idxs]
-            print(np.sum(y_), len(idxs))
             if np.sum(y_) > 0:
                 self.baseline_classifiers[i].fit(X_, y_)
             else:
                 self.baseline_classifiers[i] = None
-
-    def transform(self, X):
         R = []
         for model in self.baseline_classifiers:
             if model is None:
-                y_hat = [0]*X.shape[0]
+                y_hat = [0]*precalc_embeddings_reference.shape[0]
             else:
-                y_hat = list(model.predict_proba(X)[:,1])
+                y_hat = list(model.predict_proba(precalc_embeddings_reference)[:,1])
             R += [y_hat]
-        X = np.array(R).T
-        print(X.shape)
+        _X_transformed_reference = np.array(R).T
+        self._kneigh_regressor = KNeighborsRegressor(n_neighbors=1)
+        self._kneigh_regressor.fit(precalc_embeddings_reference, _X_transformed_reference)
+
+    def transform(self, X):
+        X = self._kneigh_regressor.predict(X)
         return X
     
     def fit_transform(self, X, y, promiscuity_counts):
@@ -139,28 +145,22 @@ class BaselineClassifierReducer(object):
 class LigandDiscoveryClassifier(object):
     def __init__(self):
         tabpfn_model.remove_models_from_memory()
-        self.reducer_0 = LOL(n_components=5)
-        self.reducer_1 = BaselineClassifierReducer()
-        self.balancer = BinaryBalancer(0.5)
 
     def fit(self, X, y, promiscuity_counts):
-        X_0 = self.reducer_0.fit_transform(X, y)
-        X_1 = self.reducer_1.fit_transform(X, y, promiscuity_counts)
-        X = np.hstack([X_0, X_1])
-        X, y = self.balancer.transform(X, y)
+        n_components = int(min(np.sum(y), 100))
+        self.reducer = LOL(n_components=n_components)
+        self.balancer = BinaryBalancer(0.5)
+        X = self.reducer.fit_transform(X, y)
+        X, y = self.balancer.transform(X, y, promiscuity_counts=promiscuity_counts)
         tabpfn_model.fit(X, y)
 
     def predict_proba(self, X):
-        X_0 = self.reducer_0.transform(X)
-        X_1 = self.reducer_1.transform(X)
-        X = np.hstack([X_0, X_1])
+        X = self.reducer.transform(X)
         y_hat = tabpfn_model.predict_proba(X)
         return y_hat
 
     def predict(self, X):
-        X_0 = self.reducer_0.transform(X)
-        X_1 = self.reducer_1.transform(X)
-        X = np.hstack([X_0, X_1])
+        X = self.reducer.transform(X)
         y_hat = tabpfn_model.predict(X)
         return y_hat
 
@@ -251,19 +251,21 @@ class OnTheFlyModel(object):
         ]
         return percentiles
 
-    def estimate_performance(self, y, baseline=True):
+    def estimate_performance(self, y, baseline=True, n_splits=10, promiscuity_cut=99999):
         try:
             y = np.array(y)
             promiscuity_counts = np.array(self._fid_prom)
+            mask = promiscuity_counts < promiscuity_cut
+            y = y[mask]
+            precalc_embeddings = self.precalc_embeddings[mask]
             if np.sum(y) < 2:
                 print("Not enough positives data")
                 return None, None
-            skf = StratifiedShuffleSplit(n_splits=10, test_size=0.2, random_state=42)
+            skf = StratifiedShuffleSplit(n_splits=n_splits, test_size=0.2, random_state=42)
             aurocs = []
-            print(aurocs)
             for train_idx, test_idx in skf.split(self.precalc_embeddings, y):
-                X_train = self.precalc_embeddings[train_idx]
-                X_test = self.precalc_embeddings[test_idx]
+                X_train = precalc_embeddings[train_idx]
+                X_test = precalc_embeddings[test_idx]
                 prom_counts_train = promiscuity_counts[train_idx]
                 y_train = y[train_idx]
                 y_test = y[test_idx]
@@ -281,9 +283,12 @@ class OnTheFlyModel(object):
             print("AUROC estimation went wrong", e)
             return None, None
 
-    def estimate_performance_on_train(self, y, baseline=True):
+    def estimate_performance_on_train(self, y, baseline=True, promiscuity_cut=99999):
         y = np.array(y)
-        X = self.precalc_embeddings
+        promiscuity_counts = np.array(self._fid_prom)
+        mask = promiscuity_counts < promiscuity_cut
+        y = y[mask]
+        X = self.precalc_embeddings[mask]
         if baseline:
             self.baseline_classifier.fit(X, y)
             y_hat = self.baseline_classifier.predict_proba(X)[:, 1]
@@ -293,9 +298,12 @@ class OnTheFlyModel(object):
         auroc = roc_auc_score(y, y_hat)
         return auroc
 
-    def fit(self, y):
+    def fit(self, y, promiscuity_cut=99999):
         y = np.array(y)
-        self.classifier.fit(self.precalc_embeddings, y, self._fid_prom)
+        promiscuity_counts = np.array(self._fid_prom)
+        mask = promiscuity_counts < promiscuity_cut
+        y = y[mask]
+        self.classifier.fit(self.precalc_embeddings[mask], y, self._fid_prom)
 
     def predict_proba(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)

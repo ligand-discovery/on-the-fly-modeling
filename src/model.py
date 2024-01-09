@@ -41,15 +41,18 @@ class BinaryBalancer(object):
         sampled_idxs = np.random.choice(idxs, size=(size - X.shape[0]), replace=True, p=weights)
         X_s = X[sampled_idxs]
         if self.smote:
-            nn = NearestNeighbors(n_neighbors=min(X_s.shape[0], 4))
+            n_neighbors = min(X.shape[0], 4)
+            nn = NearestNeighbors(n_neighbors=n_neighbors)
             nn.fit(X)
             neighs = nn.kneighbors(X_s, return_distance=False)[:, 1:]
             R = []
             w = np.array([0.75, 0.5, 0.25])
+            w = w[:neighs.shape[1]]
+            idxs_to_sample = [i for i in range(neighs.shape[1])]
             w /= w.sum()
             for i in range(X_s.shape[0]):
                 gap = random.random()
-                j = int(np.random.choice([0, 1, 2], p=w))
+                j = int(np.random.choice(idxs_to_sample, p=w))
                 neigh_idx = neighs[i,j]
                 d = X[neigh_idx] - X_s[i]
                 R += [X_s[i] + gap*d]

@@ -566,21 +566,24 @@ class CommunityDetector(object):
     
 
 def task_evaluator(model, data, do_auroc=True):
-    y = np.array(data["y"])
-    mask = y != -1
-    model.baseline_classifier.fit(precalc_embeddings[mask], y[mask])
-    y_hat_ref = np.array(model.baseline_classifier.predict_proba(precalc_embeddings_reference)[:,1])
-    rho = np.nanmean([pearsonr(y_hat_ref, proteome_reference_predictions[:,j])[0] for j in range(proteome_reference_predictions.shape[1])])
-    if do_auroc:
-        auroc = model.estimate_performance(data["y"], baseline=True, n_splits=10)
-    else:
-        auroc = (None, None)
-    prom = np.mean(data[data["y"] == 1]["prom"])
-    hits = np.mean(data[data["y"] == 1]["hits"])
-    result = {
-        "auroc": auroc,
-        "prom": prom,
-        "hits": hits,
-        "ref_rho": rho
-    }
-    return result
+    try:
+        y = np.array(data["y"])
+        mask = y != -1
+        model.baseline_classifier.fit(precalc_embeddings[mask], y[mask])
+        y_hat_ref = np.array(model.baseline_classifier.predict_proba(precalc_embeddings_reference)[:,1])
+        rho = np.nanmean([pearsonr(y_hat_ref, proteome_reference_predictions[:,j])[0] for j in range(proteome_reference_predictions.shape[1])])
+        if do_auroc:
+            auroc = model.estimate_performance(data["y"], baseline=True, n_splits=10)
+        else:
+            auroc = (None, None)
+        prom = np.mean(data[data["y"] == 1]["prom"])
+        hits = np.mean(data[data["y"] == 1]["hits"])
+        result = {
+            "auroc": auroc,
+            "prom": prom,
+            "hits": hits,
+            "ref_rho": rho
+        }
+        return result
+    except:
+        return None

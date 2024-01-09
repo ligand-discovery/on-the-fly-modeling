@@ -404,6 +404,7 @@ if has_input:
         pred_tokens = [t for t in input_prediction_tokens.split("\n") if t != ""]
 
         smiles_list = []
+        original_smiles_list = []
         have_crf_count = 0
         attached_crf_count = 0
         for token in pred_tokens:
@@ -418,6 +419,7 @@ if has_input:
             else:
                 have_crf_count += 1
             smiles_list += [smi]
+            original_smiles_list += [token]
 
         if len(smiles_list) == 0:
             has_prediction_input = False
@@ -442,6 +444,7 @@ if has_input:
                 dr = pd.DataFrame(
                     {
                         "SMILES": smiles_list,
+                        "OriginalSMILES": original_smiles_list,
                         "Score": y_hat,
                         "Tau": tau_ref,
                         "TauTrain": tau_train,
@@ -456,9 +459,9 @@ if has_input:
                     expander.image(get_fragment_image(v[0]))
             else:
                 y_hat = model.predict_proba(smiles_list)[:, 1]
-                dr = pd.DataFrame({"SMILES": smiles_list, "Score": y_hat})
+                dr = pd.DataFrame({"SMILES": smiles_list, "OriginalSMILES": original_smiles_list, "Score": y_hat})
                 for v in dr.values:
                     expander = col.expander(
-                        "Score: `{0:.3f}` | SMILES: `{1}`".format(v[1], v[0])
+                        "Score: `{0:.3f}` | SMILES: `{1}`".format(v[2], v[1])
                     )
-                    expander.image(get_fragment_image(v[0]))
+                    expander.image(get_fragment_image(v[1]))

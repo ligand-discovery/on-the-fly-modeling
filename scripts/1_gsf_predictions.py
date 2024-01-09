@@ -82,7 +82,7 @@ print(X.shape)
 
 model = OnTheFlyModel()
 R = []
-slcs = slcs[68:]
+slcs = slcs
 for slc in tqdm(slcs):
     hit_selector = HitSelector([slc])
     data = hit_selector.select(max_hit_fragments=200)

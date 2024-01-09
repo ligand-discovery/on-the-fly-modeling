@@ -53,11 +53,14 @@ class BinaryBalancer(object):
             idxs_to_sample = [i for i in range(neighs.shape[1])]
             w /= w.sum()
             for i in range(X_s.shape[0]):
-                gap = random.random()
-                j = int(np.random.choice(idxs_to_sample, p=w))
-                neigh_idx = neighs[i,j]
-                d = X[neigh_idx] - X_s[i]
-                R += [X_s[i] + gap * d]
+                if len(idxs_to_sample) == 0:
+                    R += [X_s[i]]
+                else:
+                    gap = random.random()
+                    j = int(np.random.choice(idxs_to_sample, p=w))
+                    neigh_idx = neighs[i,j]
+                    d = X[neigh_idx] - X_s[i]
+                    R += [X_s[i] + gap * d]
             X_s = np.array(R)
         X = np.vstack([X, X_s])
         return X

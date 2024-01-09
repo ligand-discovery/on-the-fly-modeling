@@ -9,6 +9,7 @@ from rdkit.Chem import Draw
 from rdkit.Chem import AllChem
 from rdkit import RDLogger
 import uuid
+from CombineMols.CombineMols import CombineMols
 
 def get_session_id():
     if "session_id" not in st.session_state:
@@ -40,6 +41,10 @@ df = None
 CRF_PATTERN = "CC1(CCC#C)N=N1"
 CRF_PATTERN_0 = "C#CC"
 CRF_PATTERN_1 = "N=N"
+
+crf_0 = "C#CCC1(N=N1)CCNC(CC)=O"
+crf_0 = "ONC(=O)CCC1(CCC#C)N=N1"
+crf_1 = "C#CCC1(N=N1)CCC(=O)[N]"
 
 
 SIMILARITY_PERCENTILES = [95, 90]
@@ -169,6 +174,29 @@ def has_crf(mol):
     return True
 
 
+def attach_crf(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+    combined_mol_0 = CombineMols(mol, crf_0, "O")
+    #combined_mol_1 = CombineMols(mol, crf_1, "N")
+    combined_mol_1 = []
+    combined_mol = combined_mol_0 + combined_mol_1
+    result = []
+    for cm in combined_mol:
+        smi = Chem.MolToSmiles(cm)
+        if "." in smi:
+            continue
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+        if not has_crf(mol):
+            continue
+        result += [Chem.MolToSmiles(mol)]
+    if len(result) > 0:
+        return result[0]
+    else:
+        return None
+ 
+
 def get_fragment_image(smiles):
     m = Chem.MolFromSmiles(smiles)
     AllChem.Compute2DCoords(m)
@@ -207,7 +235,8 @@ for it in input_tokens:
 
 input_data = pids_to_dataframe(input_pids)
 
-tfidf = col.checkbox(label="TFIDF", value=True)
+#tfidf = col.checkbox(label="TFIDF", value=True)
+tfidf = True
 
 if input_data.shape[0] == 0:
     has_input = False
@@ -375,12 +404,19 @@ if has_input:
         pred_tokens = [t for t in input_prediction_tokens.split("\n") if t != ""]
 
         smiles_list = []
+        have_crf_count = 0
+        attached_crf_count = 0
         for token in pred_tokens:
             if not is_valid_smiles(token):
                 continue
             smi = token
             if not has_crf(Chem.MolFromSmiles(smi)):
-                continue
+                smi = attach_crf(smi)
+                if smi is None:
+                    continue
+                attached_crf_count += 1
+            else:
+                have_crf_count += 1
             smiles_list += [smi]
 
         if len(smiles_list) == 0:
@@ -396,8 +432,8 @@ if has_input:
 
         if has_prediction_input:
             col.info(
-                "{0} out of {1} input molecules are valid".format(
-                    len(smiles_list), len(pred_tokens)
+                "{0} out of {1} input molecules are valid. Of these, {2} had the CRF already, and for {3} of them it was automatically attached".format(
+                    len(smiles_list), len(pred_tokens), have_crf_count, attached_crf_count
                 )
             )
             do_tau = False

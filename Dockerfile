@@ -16,6 +16,7 @@ RUN echo "Components installation done"
 RUN git clone https://github.com/ligand-discovery/fragment-embedding.git
 RUN python -m pip install -e fragment-embedding/.
 RUN echo "Fragment embedding installed"
+RUN python -m pip install CombineMols
 
 EXPOSE 8501
 CMD ["streamlit", "run", "app/app.py"]

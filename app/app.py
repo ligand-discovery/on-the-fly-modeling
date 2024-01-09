@@ -286,7 +286,7 @@ if has_input:
 
     # default_max_hit_fragments = get_default_max_hit_fragments(selected_cluster)
     # default_max_prom_fragments = get_default_max_prom_fragments(selected_cluster)
-    default_max_hit_fragments = 10
+    default_max_hit_fragments = 100
     default_max_fragment_prom = 500
 
     max_hit_fragments = col.slider(

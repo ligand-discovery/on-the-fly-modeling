@@ -414,11 +414,12 @@ class OnTheFlyModel(object):
         mask = y != -1
         y = y[mask]
         X = self.precalc_embeddings[mask]
+        promiscuity_counts = np.array(self._fid_prom)[mask]
         if baseline:
             self.baseline_classifier.fit(X, y)
             y_hat = self.baseline_classifier.predict_proba(X)[:, 1]
         else:
-            y_hat = self.classifier.fit(X, y, self._fid_prom)
+            y_hat = self.classifier.fit(X, y, promiscuity_counts)
             y_hat = self.classifier.predict_proba(X)[:, 1]
         auroc = roc_auc_score(y, y_hat)
         return auroc

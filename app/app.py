@@ -31,7 +31,7 @@ from model import OnTheFlyModel, HitSelectorByOverlap, CommunityDetector, task_e
 
 cache_folder = os.path.join(root, "..", "cache")
 if not os.path.exists(cache_folder):
-    os.mkddir(cache_folder)
+    os.mkdir(cache_folder)
 
 df = None
 
@@ -222,7 +222,6 @@ else:
 
 if has_input:
 
-    print("Instantiating model")
     model = OnTheFlyModel()
     is_fitted = False
 
@@ -239,7 +238,7 @@ if has_input:
         clusters_of_proteins = [uniprot_inputs]
     else:
         graph = get_protein_graph(uniprot_inputs)
-        auroc_cut=0.6
+        auroc_cut=0.7
         graph_key = "-".join(sorted(graph.nodes()))
         clusters_cache_file = os.path.join(
             root, "..", "cache", session_id + "_clusters.joblib"
@@ -331,6 +330,11 @@ if has_input:
         is_fitted = False
 
     else:
+        task_evaluation = task_evaluator(model, data)
+        subcols[0].metric(label="Corr. other", value="{0:.3f}".format(task_evaluation["ref_rho"]))
+        subcols[1].metric(label="Frag. promiscuity", value="{0:.1f}".format(task_evaluation["prom"]))
+        subcols[2].metric(label="Interactors ({0})".format(len(uniprot_acs)), value="{0:.1f}".format(task_evaluation["hits"]))
+
         expander = col.expander("View positives")
         positives_data = data[data["y"] == 1]
         pos_fids = sorted(positives_data["fid"])
@@ -350,11 +354,11 @@ if has_input:
             col.warning("Not enough data to estimate AUROC.")
 
         else:
-            task_evaluation = task_evaluator(model, data)
             auroc = task_evaluation["auroc"]
             col.metric(
                 "AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
             )
+            subcols = col.columns(3)
 
         model.fit(data["y"])
         is_fitted = True

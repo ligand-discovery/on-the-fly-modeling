@@ -522,7 +522,6 @@ class CommunityDetector(object):
         return False
 
     def select_subgraphs(self, model, graph):
-        print("Selecting subgraphs")
         if self.accept_graph(model, graph):
             result = {
                 "ok": [graph],
@@ -555,7 +554,6 @@ class CommunityDetector(object):
             "ok": acc_subgraphs,
             "ko": rej_subgraphs
         }
-        print("Done with subgraphs suggestion")
         return result
     
     def cluster(self, model, graph):
@@ -567,7 +565,9 @@ class CommunityDetector(object):
     
 
 def task_evaluator(model, data, do_auroc=True):
-    model.baseline_classifier.fit(precalc_embeddings, data["y"])
+    y = np.array(data["y"])
+    mask = y != -1
+    model.baseline_classifier.fit(precalc_embeddings[mask], y[mask])
     y_hat_ref = np.array(model.baseline_classifier.predict_proba(precalc_embeddings_reference)[:,1])
     rho = np.nanmean([pearsonr(y_hat_ref, proteome_reference_predictions[:,j])[0] for j in range(proteome_reference_predictions.shape[1])])
     if do_auroc:

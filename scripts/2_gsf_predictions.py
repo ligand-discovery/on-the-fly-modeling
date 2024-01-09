@@ -96,5 +96,5 @@ dr = pd.DataFrame(R, columns=slcs)
 df = pd.concat([df, dr], axis=1)
 
 df.to_csv(
-    os.path.join(root, "..", "results", "1_gsf_predictions.tsv"), sep="\t", index=False
+    os.path.join(root, "..", "results", "2_gsf_predictions.tsv"), sep="\t", index=False
 )

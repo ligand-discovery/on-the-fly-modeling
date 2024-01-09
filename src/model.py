@@ -5,18 +5,25 @@ import numpy as np
 import random
 import collections
 from scipy.stats import median_abs_deviation
-from scipy.stats import rankdata
+from scipy.stats import rankdata, pearsonr
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import roc_auc_score
 from sklearn.naive_bayes import GaussianNB as BaselineClassifier
 from sklearn.neighbors import NearestNeighbors, KNeighborsRegressor
+from sklearn.feature_extraction.text import TfidfVectorizer
 from tabpfn import TabPFNClassifier
 from lol import LOL
+from community import community_louvain
 
+random.seed(42)
+np.random.seed(42)
 
 from fragmentembedding import FragmentEmbedder
 
 DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+
+proteome_reference_predictions_file = os.path.join(DATA_PATH, "proteome_reference_predictions_07.joblib")
+proteome_reference_predictions = joblib.load(proteome_reference_predictions_file)
 
 fragment_embedder = FragmentEmbedder()
 fids, _, precalc_embeddings = joblib.load(os.path.join(DATA_PATH, "cemm_emb.joblib"))
@@ -231,6 +238,107 @@ class HitSelector(object):
             data["y"] = y
         data = pd.DataFrame(data)
         return data
+    
+
+
+class HitSelectorByOverlap(object):
+    def __init__(self, uniprot_acs, tfidf):
+        self._valid_prots = set(pid_prom.keys())
+        self.uniprot_acs = [pid for pid in uniprot_acs if pid in self._valid_prots]
+        self.fids = fids
+        self.pids = self.uniprot_acs
+        self._fid_prom = []
+        for fid in self.fids:
+            if fid in fid_prom:
+                self._fid_prom += [fid_prom[fid]]
+            else:
+                self._fid_prom += [0]
+        self.tfidf = tfidf
+        self.fid2pid = collections.defaultdict(list)
+        for k,v in hits.items():
+            self.fid2pid[k[1]] += [(k[0], v)]
+
+    def select_without_tfidf(self, max_hit_fragments, max_fragment_promiscuity):
+        protein_overlaps = []
+        my_hits = []
+        for i, fid in enumerate(self.fids):
+            prom = self._fid_prom[i]
+            if prom > max_fragment_promiscuity:
+                my_hits += [-1]
+                protein_overlaps += [-1]
+            else:
+                if fid in self.fid2pid:
+                    all_prots = [x[0] for x in self.fid2pid[fid]]
+                    sel_prots = list(set(self.uniprot_acs).intersection(all_prots))
+                    my_hits += [len(sel_prots)]
+                    protein_overlaps += [len(sel_prots)/len(all_prots)]
+                else:
+                    my_hits += [0]
+                    protein_overlaps += [0]
+        y = [0]*len(fids)
+        idxs = np.argsort(protein_overlaps)[::-1]
+        idxs = idxs[:max_hit_fragments]
+        for idx in idxs:
+            if protein_overlaps[idx] == 0:
+                continue
+            y[idx] = 1
+        y = np.array(y)
+        protein_overlaps = np.array(protein_overlaps)
+        y[protein_overlaps == -1] = -1
+        data = {"fid": self.fids, "prom": self._fid_prom, "hits": my_hits, "y": list(y)}
+        return pd.DataFrame(data)
+
+    def select_with_tfidf(self, max_hit_fragments, max_fragment_promiscuity):
+        corpus = []
+        my_hits = []
+        for i, fid in enumerate(self.fids):
+            prom = self._fid_prom[i]
+            if prom > max_fragment_promiscuity:
+                my_hits += [-1]
+                corpus += [""]
+            else:
+                if fid in self.fid2pid:
+                    all_prots = [x[0] for x in self.fid2pid[fid]]
+                    sel_prots = list(set(self.uniprot_acs).intersection(all_prots))
+                    my_hits += [len(sel_prots)]
+                    corpus += [" ".join([x[0] for x in self.fid2pid[fid] for _ in range(int(x[1]))])]
+                else:
+                    my_hits += [0]
+                    corpus += [""]
+        vectorizer = TfidfVectorizer(min_df=1, lowercase=False)
+        tfidf_matrix = vectorizer.fit_transform(corpus).toarray()
+        feature_names = vectorizer.get_feature_names_out()
+        idxs = []
+        for i, n in enumerate(feature_names):
+            if n in self.uniprot_acs:
+                idxs += [i]
+        all_vals = np.sum(tfidf_matrix, axis=1)
+        sel_vals = np.sum(tfidf_matrix[:,idxs], axis=1)
+        prop_vals = []
+        for s, a in zip(sel_vals, all_vals):
+            if a == 0:
+                prop_vals += [0]
+            else:
+                prop_vals += [s/a]
+        y = [0]*len(fids)
+        idxs = np.argsort(prop_vals)[::-1]
+        idxs = idxs[:max_hit_fragments]
+        for idx in idxs:
+            if prop_vals[idx] == 0:
+                continue
+            y[idx] = 1
+        y = np.array(y)
+        my_hits = np.array(my_hits)
+        y[my_hits == -1] = -1
+        data = {"fid": self.fids, "prom": self._fid_prom, "hits": list(my_hits), "y": list(y)}
+        return pd.DataFrame(data)
+
+    def select(self, max_hit_fragments, max_fragment_promiscuity):
+        if self.tfidf:
+            return self.select_with_tfidf(max_hit_fragments=max_hit_fragments, max_fragment_promiscuity=max_fragment_promiscuity)
+        else:
+            return self.select_without_tfidf(max_hit_fragments=max_hit_fragments, max_fragment_promiscuity=max_fragment_promiscuity)
+
 
 
 class OnTheFlyModel(object):
@@ -319,7 +427,8 @@ class OnTheFlyModel(object):
         y = np.array(y)
         mask = y != -1
         y = y[mask]
-        self.classifier.fit(self.precalc_embeddings[mask], y, self._fid_prom)
+        promiscuity_counts = np.array(self._fid_prom)[mask]
+        self.classifier.fit(self.precalc_embeddings[mask], y, promiscuity_counts)
 
     def predict_proba(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
@@ -352,3 +461,125 @@ class OnTheFlyModel(object):
         tau_ref = self._calculate_percentiles(y_hat, reference_y_hat)
         tau_train = self._calculate_percentiles(y_hat, train_y_hat)
         return y_hat, tau_ref, tau_train
+
+
+def evaluate_predictive_capacity(model, uniprot_acs, tfidf):
+    prom_cuts = []
+    hit_cuts = []
+    aurocs = []
+    n_pos = []
+    n_tot = []
+    for prom_cut in [50, 100, 250, 500]:
+        for hit_cut in [10, 50, 100, 200]:
+            prom_cuts += [prom_cut]
+            hit_cuts += [hit_cut]
+            data = HitSelectorByOverlap(uniprot_acs=uniprot_acs, tfidf=tfidf).select(hit_cut, prom_cut)
+            n_pos += [len(data[data["y"] == 1])]
+            n_tot += [len(data[data["y"] != -1])]
+            auroc = model.estimate_performance(data["y"], baseline=True, n_splits=10)
+            aurocs += [auroc[0]]
+    data = {"hit_cut": hit_cuts, "prom_cut": prom_cuts, "n_pos": n_pos, "n_tot": n_tot, "auroc": aurocs}
+    return pd.DataFrame(data)
+
+
+def evaluate_predictive_capacity_aggregate(model, uniprot_acs, tfidf, auroc_percentile=75):
+    res = evaluate_predictive_capacity(model=model, uniprot_acs=uniprot_acs, tfidf=tfidf)
+    aurocs = []
+    for auroc in list(res["auroc"]):
+        if str(auroc) == "nan":
+            aurocs += [0.5]
+        else:
+            aurocs += [float(auroc)]
+    return np.percentile(aurocs, auroc_percentile)
+
+
+class CommunityDetector(object):
+
+    def __init__(self, auroc_cut=0.7, tfidf=True):
+        self.auroc_cut = auroc_cut
+        self.tfidf = tfidf
+
+    def community_subgraphs(self, graph):
+        partition = community_louvain.best_partition(graph, randomize=False, random_state=42)
+        clusters = collections.defaultdict(list)
+        for k, v in partition.items():
+            clusters[v] += [k]
+        clusters = [tuple(sorted(v)) for k, v in clusters.items()]
+        clusters = set(clusters)
+        clusters = sorted(clusters, key=lambda x: -len(x))
+        subgraphs = []
+        for nodes in clusters:
+            subgraphs += [graph.subgraph(list(nodes)).copy()]
+        return subgraphs
+    
+    def accept_graph(self, model, graph):
+        uniprot_acs = graph.nodes()
+        if len(uniprot_acs) == 1:
+            return True
+        auroc = evaluate_predictive_capacity_aggregate(model=model, uniprot_acs=uniprot_acs, tfidf=self.tfidf)
+        if auroc > self.auroc_cut:
+            return True
+        return False
+
+    def select_subgraphs(self, model, graph):
+        print("Selecting subgraphs")
+        if self.accept_graph(model, graph):
+            result = {
+                "ok": [graph],
+                "ko": []
+            }
+            return result
+        acc_subgraphs = []
+        rej_subgraphs_0 = []
+        for subgraph in self.community_subgraphs(graph):
+            if self.accept_graph(model, subgraph):
+                acc_subgraphs += [subgraph]
+            else:
+                rej_subgraphs_0 += [subgraph]
+        rej_subgraphs_1 = []
+        for rej_subgraph in rej_subgraphs_0:
+            for subgraph in self.community_subgraphs(rej_subgraph):
+                if self.accept_graph(model, subgraph):
+                    acc_subgraphs += [subgraph]
+                else:
+                    rej_subgraphs_1 += [subgraph]
+        rej_subgraphs_2 = []
+        for rej_subgraph in rej_subgraphs_1:
+            for subgraph in self.community_subgraphs(rej_subgraph):
+                if self.accept_graph(model, subgraph):
+                    acc_subgraphs += [subgraph]
+                else:
+                    rej_subgraphs_2 += [subgraph]
+        rej_subgraphs = rej_subgraphs_2
+        result = {
+            "ok": acc_subgraphs,
+            "ko": rej_subgraphs
+        }
+        print("Done with subgraphs suggestion")
+        return result
+    
+    def cluster(self, model, graph):
+        result_graph = self.select_subgraphs(model, graph)
+        ok_list = [[n for n in g.nodes()] for g in result_graph["ok"]]
+        ko_list = [[n for n in g.nodes()] for g in result_graph["ko"]]
+        result = {"ok": sorted(ok_list, key=lambda x: -len(x)), "ko": sorted(ko_list, key=lambda x: -len(x))}
+        return result
+    
+
+def task_evaluator(model, data, do_auroc=True):
+    model.baseline_classifier.fit(precalc_embeddings, data["y"])
+    y_hat_ref = np.array(model.baseline_classifier.predict_proba(precalc_embeddings_reference)[:,1])
+    rho = np.nanmean([pearsonr(y_hat_ref, proteome_reference_predictions[:,j])[0] for j in range(proteome_reference_predictions.shape[1])])
+    if do_auroc:
+        auroc = model.estimate_performance(data["y"], baseline=True, n_splits=10)
+    else:
+        auroc = (None, None)
+    prom = np.mean(data[data["y"] == 1]["prom"])
+    hits = np.mean(data[data["y"] == 1]["hits"])
+    result = {
+        "auroc": auroc,
+        "prom": prom,
+        "hits": hits,
+        "ref_rho": rho
+    }
+    return result

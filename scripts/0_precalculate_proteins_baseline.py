@@ -43,3 +43,19 @@ for uniprot_ac in tqdm(list(pid_prom.keys())):
 
 file_name = os.path.join(root, "..", "data", "protein_precalcs_baseline.joblib")
 joblib.dump(results, file_name)
+
+protein_precalcs_baseline = joblib.load(os.path.join("..", "data", "data/protein_precalcs_baseline.joblib"))
+
+proteome_reference_predictions_file = os.path.join("..", "data", "proteome_reference_predictions_07.joblib")
+
+proteome_reference_predictions = []
+for r in protein_precalcs_baseline:
+    auroc = r["auroc"][0]
+    if auroc is None:
+        continue
+    if auroc < 0.7:
+        continue
+    proteome_reference_predictions += [r["y_hat_ref"]]
+proteome_reference_predictions = np.array(proteome_reference_predictions).T
+
+joblib.dump(proteome_reference_predictions, proteome_reference_predictions_file)

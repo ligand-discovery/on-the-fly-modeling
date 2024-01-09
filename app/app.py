@@ -8,9 +8,7 @@ from rdkit import Chem
 from rdkit.Chem import Draw
 from rdkit.Chem import AllChem
 from rdkit import RDLogger
-import community as community_louvain
 import uuid
-
 
 def get_session_id():
     if "session_id" not in st.session_state:
@@ -29,7 +27,11 @@ st.set_page_config(layout="wide")
 root = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.append(os.path.join(root, "..", "src"))
-from model import OnTheFlyModel, HitSelector
+from model import OnTheFlyModel, HitSelectorByOverlap, CommunityDetector, task_evaluator
+
+cache_folder = os.path.join(root, "..", "cache")
+if not os.path.exists(cache_folder):
+    os.mkddir(cache_folder)
 
 df = None
 
@@ -205,6 +207,7 @@ for it in input_tokens:
 
 input_data = pids_to_dataframe(input_pids)
 
+tfidf = col.checkbox(label="TFIDF", value=True)
 
 if input_data.shape[0] == 0:
     has_input = False
@@ -218,6 +221,11 @@ else:
     has_input = True
 
 if has_input:
+
+    print("Instantiating model")
+    model = OnTheFlyModel()
+    is_fitted = False
+
     col.info(
         "{0} out of {1} input proteins were found in the Ligand Discovery interactome, corresponding to all statistically significant fragment-protein pairs.".format(
             len(input_pids), len(input_tokens)
@@ -226,23 +234,30 @@ if has_input:
 
     col.dataframe(input_data, hide_index=True)
 
+    uniprot_inputs = list(input_data["UniprotAC"])
+    if len(uniprot_inputs) == 1:
+        clusters_of_proteins = [uniprot_inputs]
+    else:
+        graph = get_protein_graph(uniprot_inputs)
+        auroc_cut=0.6
+        graph_key = "-".join(sorted(graph.nodes()))
+        clusters_cache_file = os.path.join(
+            root, "..", "cache", session_id + "_clusters.joblib"
+        )
+        clusters_of_proteins = None
+        if os.path.exists(clusters_cache_file):
+            gk, clu = joblib.load(clusters_cache_file)
+            if gk == graph_key:
+                clusters_of_proteins = clu
+        if clusters_of_proteins is None:
+            community_detector = CommunityDetector(tfidf=tfidf, auroc_cut=auroc_cut)
+            clusters_of_proteins = community_detector.cluster(model, graph)
+            clusters_of_proteins = clusters_of_proteins["ok"]
+            joblib.dump((graph_key, clusters_of_proteins), clusters_cache_file)
+        
     col = cols[1]
 
     col.subheader(":robot_face: Quick modeling")
-
-    graph = get_protein_graph(list(input_data["UniprotAC"]))
-    graph_key = "-".join(sorted(graph.nodes()))
-    clusters_cache_file = os.path.join(
-        root, "..", "cache", session_id + "_clusters.joblib"
-    )
-    clusters_of_proteins = None
-    if os.path.exists(clusters_cache_file):
-        gk, clu = joblib.load(clusters_cache_file)
-        if gk == graph_key:
-            clusters_of_proteins = clu
-    if clusters_of_proteins is None:
-        clusters_of_proteins = get_clusters_of_proteins_from_graph(graph)
-        joblib.dump((graph_key, clusters_of_proteins), clusters_cache_file)
 
     only_one_option = False
     if len(clusters_of_proteins) == 1:
@@ -253,21 +268,27 @@ if has_input:
     if not only_one_option:
         for prot_clust in clusters_of_proteins:
             options += [", ".join(sorted([pid2name[pid] for pid in prot_clust]))]
-
+        options += ["Full set of proteins"]
+    else:
+        if len(clusters_of_proteins[0]) == 1:
+            options = [pid2name[clusters_of_proteins[0][0]]]
+        else:
+            options = ["Full set of proteins"]
+    
     selected_cluster = col.radio(
         "These are some suggested groups of proteins for modeling",
-        options=options + ["Full set of proteins"],
+        options=options,
     )
 
     if selected_cluster == "Full set of proteins":
-        selected_cluster = list(input_data["UniprotAC"])
+        selected_cluster = uniprot_inputs
     else:
         selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
 
     # default_max_hit_fragments = get_default_max_hit_fragments(selected_cluster)
     # default_max_prom_fragments = get_default_max_prom_fragments(selected_cluster)
     default_max_hit_fragments = 10
-    default_max_prom_fragments = 100
+    default_max_fragment_prom = 500
 
     max_hit_fragments = col.slider(
         "Maximum number of positives",
@@ -278,27 +299,30 @@ if has_input:
         help="Fragments will be ranked by specificity, i.e. by ascending value of promiscuity.",
     )
 
-    max_prom_fragments = col.slider(
+    max_fragment_prom = col.slider(
         "Maximum promiscuity of included fragments",
         min_value=50,
         max_value=500,
         step=10,
-        value=default_max_prom_fragments,
+        value=default_max_fragment_prom,
         help="Maximum number of proteins for included fragments.",
     )
 
     uniprot_acs = list(selected_cluster)
-    model = OnTheFlyModel()
-    is_fitted = False
+
+    data = HitSelectorByOverlap(uniprot_acs=uniprot_acs, tfidf=tfidf).select(max_hit_fragments=max_hit_fragments, max_fragment_promiscuity=max_fragment_prom)
 
     num_positives = len(data[data["y"] == 1])
     num_total = len(data[data["y"] != -1])
 
-    col.metric(
-        "Number of positives in the Ligand Discovery dataset", value=num_positives
+    subcols = col.columns(3)
+    subcols[0].metric(
+        "Positives", value=num_positives
     )
 
-    col.metric("Total fragments", value=num_total)
+    subcols[1].metric("Total", value=num_total)
+
+    subcols[2].metric("Rate", value="{0:.1f}%".format(num_positives/num_total*100))
 
     if num_positives == 0:
         col.error(
@@ -326,7 +350,8 @@ if has_input:
             col.warning("Not enough data to estimate AUROC.")
 
         else:
-            auroc = model.estimate_performance(data["y"], baseline=True)
+            task_evaluation = task_evaluator(model, data)
+            auroc = task_evaluation["auroc"]
             col.metric(
                 "AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
             )

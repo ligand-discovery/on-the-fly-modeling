@@ -38,7 +38,9 @@ class BinaryBalancer(object):
 
     def _resample(self, X, size, weights):
         idxs = [i for i in range(X.shape[0])]
-        sampled_idxs = np.random.choice(idxs, size=(size - X.shape[0]), replace=True, p=weights)
+        sampled_idxs = np.random.choice(
+            idxs, size=(size - X.shape[0]), replace=True, p=weights
+        )
         X_s = X[sampled_idxs]
         if self.smote:
             n_neighbors = min(X.shape[0], 4)
@@ -55,7 +57,7 @@ class BinaryBalancer(object):
                 j = int(np.random.choice(idxs_to_sample, p=w))
                 neigh_idx = neighs[i,j]
                 d = X[neigh_idx] - X_s[i]
-                R += [X_s[i] + gap*d]
+                R += [X_s[i] + gap * d]
             X_s = np.array(R)
         X = np.vstack([X, X_s])
         return X
@@ -65,15 +67,15 @@ class BinaryBalancer(object):
             sample_weights = None
         else:
             promiscuity_counts = np.clip(promiscuity_counts, 10, 500)
-            sample_weights = [1/p for p in promiscuity_counts]
+            sample_weights = [1 / p for p in promiscuity_counts]
         X = np.array(X)
         y = np.array(y)
         X_0 = X[y == 0]
         X_1 = X[y == 1]
-        num_0_samples = int(self.n_samples*(1 - self.proportion))
-        num_1_samples = int(self.n_samples*self.proportion)
+        num_0_samples = int(self.n_samples * (1 - self.proportion))
+        num_1_samples = int(self.n_samples * self.proportion)
         if sample_weights is None:
-            sample_weights = np.array([1.]*X.shape[0])
+            sample_weights = np.array([1.0] * X.shape[0])
         else:
             sample_weights = np.array(sample_weights)
         weights_0 = sample_weights[y == 0]
@@ -83,7 +85,7 @@ class BinaryBalancer(object):
         X_0 = self._resample(X_0, num_0_samples, weights_0)
         X_1 = self._resample(X_1, num_1_samples, weights_1)
         X = np.vstack([X_0, X_1])
-        y = np.array([0]*X_0.shape[0] + [1]*X_1.shape[0])
+        y = np.array([0] * X_0.shape[0] + [1] * X_1.shape[0])
         idxs = [i for i in range(len(y))]
         random.shuffle(idxs)
         X = X[idxs]
@@ -112,7 +114,9 @@ class BaselineClassifierReducer(object):
         self.top_cuts = [50, 100, 250, 500]
 
     def fit(self, X, y, promiscuity_counts):
-        self.baseline_classifiers = [LigandDiscoveryBaselineClassifier() for _ in range(len(self.top_cuts))]
+        self.baseline_classifiers = [
+            LigandDiscoveryBaselineClassifier() for _ in range(len(self.top_cuts))
+        ]
         for i, top_cut in enumerate(self.top_cuts):
             idxs = []
             for j, pc in enumerate(promiscuity_counts):
@@ -128,18 +132,20 @@ class BaselineClassifierReducer(object):
         R = []
         for model in self.baseline_classifiers:
             if model is None:
-                y_hat = [0]*precalc_embeddings_reference.shape[0]
+                y_hat = [0] * precalc_embeddings_reference.shape[0]
             else:
-                y_hat = list(model.predict_proba(precalc_embeddings_reference)[:,1])
+                y_hat = list(model.predict_proba(precalc_embeddings_reference)[:, 1])
             R += [y_hat]
         _X_transformed_reference = np.array(R).T
         self._kneigh_regressor = KNeighborsRegressor(n_neighbors=1)
-        self._kneigh_regressor.fit(precalc_embeddings_reference, _X_transformed_reference)
+        self._kneigh_regressor.fit(
+            precalc_embeddings_reference, _X_transformed_reference
+        )
 
     def transform(self, X):
         X = self._kneigh_regressor.predict(X)
         return X
-    
+
     def fit_transform(self, X, y, promiscuity_counts):
         self.fit(X, y, promiscuity_counts)
         return self.transform(X)
@@ -225,7 +231,8 @@ class HitSelector(object):
 
 
 class OnTheFlyModel(object):
-    def __init__(self):
+    def __init__(self, verbose=False):
+        self.verbose = verbose
         self.fragment_embedder = fragment_embedder
         self.precalc_embeddings = precalc_embeddings
         self.precalc_embeddings_reference = precalc_embeddings_reference
@@ -254,19 +261,22 @@ class OnTheFlyModel(object):
         ]
         return percentiles
 
-    def estimate_performance(self, y, baseline=True, n_splits=10, promiscuity_cut=99999):
+    def estimate_performance(self, y, baseline=True, n_splits=10):
         try:
-            y = np.array(y)
             promiscuity_counts = np.array(self._fid_prom)
-            mask = promiscuity_counts < promiscuity_cut
-            y = y[mask]
+            y = np.array(y)
+            mask = y != -1
             precalc_embeddings = self.precalc_embeddings[mask]
+            y = y[mask]
             if np.sum(y) < 2:
-                print("Not enough positives data")
+                if self.verbose:
+                    print("Not enough positives data")
                 return None, None
-            skf = StratifiedShuffleSplit(n_splits=n_splits, test_size=0.2, random_state=42)
+            skf = StratifiedShuffleSplit(
+                n_splits=n_splits, test_size=0.2, random_state=42
+            )
             aurocs = []
-            for train_idx, test_idx in skf.split(self.precalc_embeddings, y):
+            for train_idx, test_idx in skf.split(precalc_embeddings, y):
                 X_train = precalc_embeddings[train_idx]
                 X_test = precalc_embeddings[test_idx]
                 prom_counts_train = promiscuity_counts[train_idx]
@@ -279,17 +289,18 @@ class OnTheFlyModel(object):
                     self.classifier.fit(X_train, y_train, prom_counts_train)
                     y_hat = self.classifier.predict_proba(X_test)[:, 1]
                 auroc = roc_auc_score(y_test, y_hat)
-                print(auroc)
+                if self.verbose:
+                    print(auroc)
                 aurocs += [auroc]
             return np.median(aurocs), median_abs_deviation(aurocs)
         except Exception as e:
-            print("AUROC estimation went wrong", e)
+            if self.verbose:
+                print("AUROC estimation went wrong", e)
             return None, None
 
-    def estimate_performance_on_train(self, y, baseline=True, promiscuity_cut=99999):
+    def estimate_performance_on_train(self, y, baseline=True):
         y = np.array(y)
-        promiscuity_counts = np.array(self._fid_prom)
-        mask = promiscuity_counts < promiscuity_cut
+        mask = y != -1
         y = y[mask]
         X = self.precalc_embeddings[mask]
         if baseline:
@@ -301,10 +312,9 @@ class OnTheFlyModel(object):
         auroc = roc_auc_score(y, y_hat)
         return auroc
 
-    def fit(self, y, promiscuity_cut=99999):
+    def fit(self, y):
         y = np.array(y)
-        promiscuity_counts = np.array(self._fid_prom)
-        mask = promiscuity_counts < promiscuity_cut
+        mask = y != -1
         y = y[mask]
         self.classifier.fit(self.precalc_embeddings[mask], y, self._fid_prom)
 
@@ -317,11 +327,11 @@ class OnTheFlyModel(object):
         X = fragment_embedder.transform(smiles_list)
         y_hat = self.classifier.predict(X)
         return y_hat
-    
+
     def predict_proba_on_train(self):
         y_hat = self.classifier.predict_proba(self.precalc_embeddings)
         return y_hat
-    
+
     def predict_on_train(self):
         y_hat = self.classifier.predict(self.precalc_embeddings)
         return y_hat
@@ -330,7 +340,7 @@ class OnTheFlyModel(object):
         X = fragment_embedder.transform(smiles_list)
         y_hat = self.classifier.predict_proba(X)[:, 1]
         sample_indices = np.random.choice(
-            self.precalc_embeddings_reference.shape[0], size=1000, replace=False 
+            self.precalc_embeddings_reference.shape[0], size=1000, replace=False
         )
         reference_y_hat = self.classifier.predict_proba(
             self.precalc_embeddings_reference

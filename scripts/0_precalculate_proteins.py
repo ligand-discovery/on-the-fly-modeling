@@ -25,8 +25,6 @@ for uniprot_ac in tqdm(list(pid_prom.keys())):
     y_hat_train = [
         float(x) for x in mdl.classifier.predict_proba(precalc_embeddings)[:, 1]
     ]
-    y_hat_ref = None
-    # y_hat_ref = list(mdl.classifier.predict_proba(precalc_embeddings_reference)[:,1])
     result = {
         "uniprot_ac": uniprot_ac,
         "auroc": auroc,
@@ -34,9 +32,9 @@ for uniprot_ac in tqdm(list(pid_prom.keys())):
         "auroc_baseline_10": auroc_baseline_10,
         "n_pos": int(np.sum(data["y"])),
         "y_hat_train": y_hat_train,
-        "y_hat_ref": y_hat_ref,
+        "y_hat_ref": None,
     }
     results += [result]
 
-file_name = os.path.join(root, "..", "data", "protein_precalcs_only_aucs.joblib")
+file_name = os.path.join(root, "..", "data", "protein_precalcs.joblib")
 joblib.dump(results, file_name)

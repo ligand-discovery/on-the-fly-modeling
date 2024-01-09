@@ -2,7 +2,6 @@ import os
 import sys
 import streamlit as st
 import pandas as pd
-import collections
 import joblib
 import numpy as np
 from rdkit import Chem
@@ -10,6 +9,16 @@ from rdkit.Chem import Draw
 from rdkit.Chem import AllChem
 from rdkit import RDLogger
 import community as community_louvain
+import uuid
+
+
+def get_session_id():
+    if "session_id" not in st.session_state:
+        st.session_state["session_id"] = str(uuid.uuid4())
+    return st.session_state["session_id"]
+
+
+session_id = get_session_id()
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -59,7 +68,7 @@ global_uniprot_acs_1, M1, cutoffs_1 = load_protein_hit_similarity_matrix()
 
 
 @st.cache_data()
-def get_clusters_for_modeling(uniprot_acs):
+def get_protein_graph(uniprot_acs):
     G = nx.Graph()
     G.add_nodes_from(uniprot_acs)
     pid2idx_0 = dict((k, i) for i, k in enumerate(global_uniprot_acs_0))
@@ -84,14 +93,7 @@ def get_clusters_for_modeling(uniprot_acs):
                     else:
                         current_weight = G[pid_0][pid_1].get("weight")
                         G[pid_0][pid_1]["weight"] = current_weight + 1
-    partition = community_louvain.best_partition(G)
-    clusters = collections.defaultdict(list)
-    for k, v in partition.items():
-        clusters[v] += [k]
-    clusters = [tuple(sorted(v)) for k, v in clusters.items()]
-    clusters = set(clusters)
-    clusters = sorted(clusters, key=lambda x: -len(x))
-    return clusters
+    return G
 
 
 @st.cache_data()
@@ -228,27 +230,29 @@ if has_input:
 
     col.subheader(":robot_face: Quick modeling")
 
-    clusters_of_proteins = get_clusters_for_modeling(list(input_data["UniprotAC"]))
+    graph = get_protein_graph(list(input_data["UniprotAC"]))
+    graph_key = "-".join(sorted(graph.nodes()))
+    clusters_cache_file = os.path.join(
+        root, "..", "cache", session_id + "_clusters.joblib"
+    )
+    clusters_of_proteins = None
+    if os.path.exists(clusters_cache_file):
+        gk, clu = joblib.load(clusters_cache_file)
+        if gk == graph_key:
+            clusters_of_proteins = clu
+    if clusters_of_proteins is None:
+        clusters_of_proteins = get_clusters_of_proteins_from_graph(graph)
+        joblib.dump((graph_key, clusters_of_proteins), clusters_cache_file)
+
+    only_one_option = False
+    if len(clusters_of_proteins) == 1:
+        if sorted(clusters_of_proteins[0]) == sorted(list(input_data["UniprotAC"])):
+            only_one_option = True
 
     options = []
-    for prot_clust in clusters_of_proteins:
-        options += [", ".join(sorted([pid2name[pid] for pid in prot_clust]))]
-
-    type_options = ["At least one", "At least half", "All"]
-    type_of_prediction = col.radio(
-        "Within a group, predict...", options=type_options, index=1, horizontal=True
-    )
-    type_proportions = [0, 0.5, 1]
-    type_selected_proportion = type_proportions[type_options.index(type_of_prediction)]
-
-    max_hit_fragments = col.slider(
-        "Maximum number of hits per group",
-        min_value=10,
-        max_value=200,
-        step=10,
-        value=100,
-        help="Fragments will be ranked by specificity, i.e. by ascending value of promiscuity.",
-    )
+    if not only_one_option:
+        for prot_clust in clusters_of_proteins:
+            options += [", ".join(sorted([pid2name[pid] for pid in prot_clust]))]
 
     selected_cluster = col.radio(
         "These are some suggested groups of proteins for modeling",
@@ -260,21 +264,41 @@ if has_input:
     else:
         selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
 
+    # default_max_hit_fragments = get_default_max_hit_fragments(selected_cluster)
+    # default_max_prom_fragments = get_default_max_prom_fragments(selected_cluster)
+    default_max_hit_fragments = 10
+    default_max_prom_fragments = 100
+
+    max_hit_fragments = col.slider(
+        "Maximum number of positives",
+        min_value=10,
+        max_value=200,
+        step=10,
+        value=default_max_hit_fragments,
+        help="Fragments will be ranked by specificity, i.e. by ascending value of promiscuity.",
+    )
+
+    max_prom_fragments = col.slider(
+        "Maximum promiscuity of included fragments",
+        min_value=50,
+        max_value=500,
+        step=10,
+        value=default_max_prom_fragments,
+        help="Maximum number of proteins for included fragments.",
+    )
+
     uniprot_acs = list(selected_cluster)
     model = OnTheFlyModel()
     is_fitted = False
 
-    hit_selector = HitSelector(uniprot_acs=uniprot_acs)
-    data = hit_selector.select(
-        min_prop_hit_proteins=type_selected_proportion,
-        max_hit_fragments=max_hit_fragments,
-    )
-
-    num_positives = np.sum(data["y"])
+    num_positives = len(data[data["y"] == 1])
+    num_total = len(data[data["y"] != -1])
 
     col.metric(
         "Number of positives in the Ligand Discovery dataset", value=num_positives
     )
+
+    col.metric("Total fragments", value=num_total)
 
     if num_positives == 0:
         col.error(
@@ -302,28 +326,7 @@ if has_input:
             col.warning("Not enough data to estimate AUROC.")
 
         else:
-            #baseline = col.checkbox(label="Fast baseline AUROC estimation", value=True)
-            baseline = True
-            auroc = model.estimate_performance(data["y"], baseline)
-            
-            do_plots = False
-            if do_plots:
-                import matplotlib.pyplot as plt
-                from sklearn.metrics import roc_curve
-                model.fit_on_train(data["y"])
-                y_hat_train = model.predict_proba_on_train()[:,1]
-                cols_ = st.columns(3)
-                fig, ax = plt.subplots(figsize=(5,5))
-                ax.hist(y_hat_train)
-                cols_[0].pyplot(fig)
-                fpr, tpr, _ = roc_curve(data["y"], y_hat_train)
-                fig, ax = plt.subplots(figsize=(5,5))
-                ax.plot(fpr, tpr)
-                cols_[1].pyplot(fig)
-                y_hat_train = model.predict_proba([v for k,v in fid2smi.items()])[:,1]
-                fig, ax = plt.subplots(figsize=(5,5))
-                ax.hist(y_hat_train)
-                cols_[2].pyplot(fig)
+            auroc = model.estimate_performance(data["y"], baseline=True)
             col.metric(
                 "AUROC estimation", value="{0:.3f} ± {1:.3f}".format(auroc[0], auroc[1])
             )
@@ -368,7 +371,6 @@ if has_input:
                     len(smiles_list), len(pred_tokens)
                 )
             )
-            # do_tau = col.checkbox("Calculate Tau (slower)", value=False)
             do_tau = False
             if do_tau:
                 y_hat, tau_ref, tau_train = model.predict_proba_and_tau(smiles_list)

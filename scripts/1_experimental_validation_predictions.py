@@ -10,11 +10,15 @@ sys.path.append(os.path.join(root, "..", "src"))
 from model import OnTheFlyModel, HitSelector
 
 print("Loading protein precalcs")
-protein_precalcs = joblib.load(os.path.join(root, "..", "data", "protein_precalcs.joblib"))
+protein_precalcs = joblib.load(
+    os.path.join(root, "..", "data", "protein_precalcs.joblib")
+)
 
 print("Getting list of SLCs")
 slcs_all = []
-with open(os.path.join(root, "..", "data", "examples", "slc_cemm_interest.txt"), "r") as f:
+with open(
+    os.path.join(root, "..", "data", "examples", "slc_cemm_interest.txt"), "r"
+) as f:
     for l in f:
         slcs_all += [l.rstrip()]
 
@@ -28,7 +32,10 @@ for d in protein_precalcs:
     aurocs += [d["auroc"]]
 
 print("Loading molecules for prediction")
-df = pd.read_csv(os.path.join(root, "..", "data", "experimental", "validation_hits_with_slc.tsv"), sep="\t")
+df = pd.read_csv(
+    os.path.join(root, "..", "data", "experimental", "validation_hits_with_slc.tsv"),
+    sep="\t",
+)
 
 model = OnTheFlyModel()
 R = []
@@ -36,7 +43,7 @@ for slc in slcs:
     hit_selector = HitSelector([slc])
     data = hit_selector.select(max_hit_fragments=200)
     model.fit(data["y"])
-    y_hat = model.predict_proba(list(df["smiles"]))[:,1]
+    y_hat = model.predict_proba(list(df["smiles"]))[:, 1]
     R += [list(y_hat)]
 
 R = np.array(R).T
@@ -44,4 +51,7 @@ R = np.array(R).T
 dr = pd.DataFrame(R, columns=slcs)
 df = pd.concat([df, dr], axis=1)
 
-df.to_csv(os.path.join(root, "..", "results", "1_experimental_validation_predictions.tsv"), sep="\t")
+df.to_csv(
+    os.path.join(root, "..", "results", "1_experimental_validation_predictions.tsv"),
+    sep="\t",
+)

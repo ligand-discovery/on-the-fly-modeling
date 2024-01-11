@@ -38,7 +38,7 @@ tabpfn_model = TabPFNClassifier(device="cpu", N_ensemble_configurations=32)
 
 
 class BinaryBalancer(object):
-    def __init__(self, proportion=0.5, n_samples=1000, smote=True):
+    def __init__(self, proportion=0.5, n_samples=1000, smote=False):
         self.proportion = proportion
         self.n_samples = n_samples
         self.smote = smote
@@ -424,41 +424,67 @@ class OnTheFlyModel(object):
         auroc = roc_auc_score(y, y_hat)
         return auroc
 
-    def fit(self, y):
+    def fit(self, y, baseline=False):
         y = np.array(y)
         mask = y != -1
         y = y[mask]
+        X = self.precalc_embeddings[mask]
         promiscuity_counts = np.array(self._fid_prom)[mask]
-        self.classifier.fit(self.precalc_embeddings[mask], y, promiscuity_counts)
+        if not baseline:
+            self.classifier.fit(X, y, promiscuity_counts)
+        else:
+            self.baseline_classifier.fit(X, y)
+        self._is_fitted_baseline = baseline
 
     def predict_proba(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
-        y_hat = self.classifier.predict_proba(X)
+        if not self._is_fitted_baseline:
+            y_hat = self.classifier.predict_proba(X)
+        else:
+            y_hat = self.baseline_classifier.predict_proba(X)
         return y_hat
 
     def predict(self, smiles_list):
         X = fragment_embedder.transform(smiles_list)
-        y_hat = self.classifier.predict(X)
+        if not self._is_fitted_baseline:
+            y_hat = self.classifier.predict(X)
+        else:
+            y_hat = self.baseline_classifier.predict(X)
         return y_hat
 
     def predict_proba_on_train(self):
-        y_hat = self.classifier.predict_proba(self.precalc_embeddings)
+        X = self.precalc_embeddings
+        if not self._is_fitted_baseline:
+            y_hat = self.classifier.predict_proba(X)
+        else:
+            y_hat = self.baseline_classifier.predict_proba(X)
         return y_hat
 
     def predict_on_train(self):
-        y_hat = self.classifier.predict(self.precalc_embeddings)
+        X = self.precalc_embeddings
+        if not self._is_fitted_baseline:
+            y_hat = self.classifier.predict(X)
+        else:
+            y_hat = self.baseline_classifier.predict(X)
         return y_hat
 
     def predict_proba_and_tau(self, smiles_list):
-        X = fragment_embedder.transform(smiles_list)
-        y_hat = self.classifier.predict_proba(X)[:, 1]
         sample_indices = np.random.choice(
             self.precalc_embeddings_reference.shape[0], size=1000, replace=False
         )
-        reference_y_hat = self.classifier.predict_proba(
-            self.precalc_embeddings_reference
-        )[sample_indices, 1]
-        train_y_hat = self.classifier.predict_proba(self.precalc_embeddings)[:, 1]
+        X = fragment_embedder.transform(smiles_list)
+        if not self._is_fitted_baseline:
+            y_hat = self.classifier.predict_proba(X)[:, 1]
+            reference_y_hat = self.classifier.predict_proba(
+                self.precalc_embeddings_reference
+            )[sample_indices, 1]
+            train_y_hat = self.classifier.predict_proba(self.precalc_embeddings)[:, 1]
+        else:
+            y_hat = self.baseline_classifier.predict_proba(X)[:, 1]
+            reference_y_hat = self.baseline_classifier.predict_proba(
+                self.precalc_embeddings_reference
+            )[sample_indices, 1]
+            train_y_hat = self.baseline_classifier.predict_proba(self.precalc_embeddings)[:, 1]    
         tau_ref = self._calculate_percentiles(y_hat, reference_y_hat)
         tau_train = self._calculate_percentiles(y_hat, train_y_hat)
         return y_hat, tau_ref, tau_train

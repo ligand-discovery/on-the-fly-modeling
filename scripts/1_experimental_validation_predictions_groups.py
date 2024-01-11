@@ -9,7 +9,7 @@ from tqdm import tqdm
 root = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.append(os.path.join(root, "..", "src"))
-from model import OnTheFlyModel, HitSelectorByOverlap, CommunityDetector
+from model import OnTheFlyModel, HitSelectorByOverlap, CommunityDetector, task_evaluator
 
 
 print("Loading molecules for prediction")
@@ -139,19 +139,33 @@ clusters_of_proteins = community_detector.cluster(model, graph)
 clusters_of_proteins = clusters_of_proteins["ok"]
 clusters_of_proteins += [uniprot_inputs]
 
+MAX_HIT_FRAGMENTS_LIST = [50, 100, 200]
+MAX_FRAGMENT_PROMISCUITY = [100, 250, 500]
 model_tasks = []
 columns = []
+columns_metadata = []
 R = []
+iter_counts = 0
 for i, uniprot_acs in enumerate(clusters_of_proteins):
-    for max_hit_fragments in tqdm([50, 100, 200]):
-        for max_fragment_promiscuity in [100, 250, 500]:
-            columns += ["clu_{0}_{1}_{2}".format(i, max_hit_fragments, max_fragment_promiscuity)]
+    for max_hit_fragments in tqdm(MAX_HIT_FRAGMENTS_LIST):
+        for max_fragment_promiscuity in MAX_FRAGMENT_PROMISCUITY:
+            print(iter_counts)
+            iter_counts += 1
+            column = "clu{0}_{1}_{2}".format(i, max_hit_fragments, max_fragment_promiscuity)
             data = HitSelectorByOverlap(uniprot_acs, tfidf=tfidf).select(max_hit_fragments, max_fragment_promiscuity)
+            task_evaluation = task_evaluator(model, data)
+            if task_evaluation is None:
+                continue
+            columns += [column]
+            columns_metadata += [task_evaluation]
             model.fit(data["y"])
             y_hat = model.predict_proba(list(df["smiles"]))[:, 1]
             R += [list(y_hat)]
 
+
 R = np.array(R).T
+
+print(R.shape)
 
 dr = pd.DataFrame(R, columns=columns)
 df = pd.concat([df, dr], axis=1)
@@ -159,4 +173,9 @@ df = pd.concat([df, dr], axis=1)
 df.to_csv(
     os.path.join(root, "..", "results", "1_experimental_validation_predictions_groups.tsv"),
     sep="\t",
+)
+
+joblib.dump(
+    columns_metadata,
+    os.path.join(root, "..", "results", "1_experimental_validation_predictions_groups.metadata")
 )

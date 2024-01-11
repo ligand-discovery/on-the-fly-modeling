@@ -12,6 +12,8 @@ root = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(root, "..", "src"))
 from model import OnTheFlyModel, HitSelector, fragment_embedder
 
+chembl_batch = int(sys.argv[1])
+
 print("Loading protein precalcs")
 protein_precalcs = joblib.load(
     os.path.join(root, "..", "data", "protein_precalcs.joblib")
@@ -36,7 +38,7 @@ for d in protein_precalcs:
 
 print("Loading molecules for prediction")
 df = pd.read_csv(
-    os.path.join(root, "..", "data", "chembl33_sample_20k_with_crf_0.csv"), sep=","
+    os.path.join(root, "..", "data", "chembl33_sample_20k_with_crf_{0}.csv".format(chembl_batch)), sep=","
 )
 
 R = []
@@ -52,7 +54,7 @@ for r in df[["smiles", "smiles_with_crf"]].values:
 print("Embeddings")
 df = pd.DataFrame(R, columns=["inchikey", "smiles"])
 
-ik2emb_file = os.path.join(root, "..", "data", "tmp_ik2emb_chembl.joblib")
+ik2emb_file = os.path.join(root, "..", "data", "tmp_ik2emb_chembl_{0}.joblib".format(chembl_batch))
 if os.path.exists(ik2emb_file):
     ik2emb = joblib.load(ik2emb_file)
 else:
@@ -95,7 +97,7 @@ dr = pd.DataFrame(R, columns=slcs)
 df = pd.concat([df, dr], axis=1)
 
 df.to_csv(
-    os.path.join(root, "..", "results", "2_chembl_predictions_0.tsv"),
+    os.path.join(root, "..", "results", "2_chembl_predictions_{0}.tsv".format(chembl_batch)),
     sep="\t",
     index=False,
 )

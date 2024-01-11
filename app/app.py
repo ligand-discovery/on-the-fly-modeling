@@ -34,6 +34,8 @@ cache_folder = os.path.join(root, "..", "cache")
 if not os.path.exists(cache_folder):
     os.mkdir(cache_folder)
 
+old_clusters_cache_file = None
+
 df = None
 
 # Functions and variables
@@ -278,10 +280,13 @@ if has_input:
             if gk == graph_key:
                 clusters_of_proteins = clu
         if clusters_of_proteins is None:
+            if old_clusters_cache_file is not None:
+                os.path.remove(old_clusters_cache_file)
             community_detector = CommunityDetector(tfidf=tfidf, auroc_cut=auroc_cut)
             clusters_of_proteins = community_detector.cluster(model, graph)
             clusters_of_proteins = clusters_of_proteins["ok"]
             joblib.dump((graph_key, clusters_of_proteins), clusters_cache_file)
+            old_clusters_cache_file = clusters_cache_file
         
     col = cols[1]
 
@@ -465,3 +470,11 @@ if has_input:
                         "Score: `{0:.3f}` | SMILES: `{1}`".format(v[2], v[1])
                     )
                     expander.image(get_fragment_image(v[1]))
+            dr_ = dr[["OriginalSMILES", "Score"]]
+            dr_.rename(columns={"OriginalSMILES": "SMILES"}, inplace=True)
+            col.download_button(
+                label="Download results as CSV",
+                data=dr_.to_csv(),
+                file_name="prediction_output.csv",
+                mime="text/csv"
+            )

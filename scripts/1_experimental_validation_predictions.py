@@ -42,7 +42,7 @@ R = []
 for slc in slcs:
     hit_selector = HitSelector([slc])
     data = hit_selector.select(max_hit_fragments=200)
-    model.fit(data["y"])
+    model.fit(data["y"], baseline=False)
     y_hat = model.predict_proba(list(df["smiles"]))[:, 1]
     R += [list(y_hat)]
 

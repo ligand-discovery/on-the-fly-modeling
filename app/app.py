@@ -11,6 +11,7 @@ from rdkit import RDLogger
 import uuid
 from CombineMols.CombineMols import CombineMols
 
+
 def get_session_id():
     if "session_id" not in st.session_state:
         st.session_state["session_id"] = str(uuid.uuid4())
@@ -179,7 +180,6 @@ def has_crf(mol):
 def attach_crf(smiles):
     mol = Chem.MolFromSmiles(smiles)
     combined_mol_0 = CombineMols(mol, crf_0, "O")
-    #combined_mol_1 = CombineMols(mol, crf_1, "N")
     combined_mol_1 = []
     combined_mol = combined_mol_0 + combined_mol_1
     result = []
@@ -197,7 +197,7 @@ def attach_crf(smiles):
         return result[0]
     else:
         return None
- 
+
 
 def get_fragment_image(smiles):
     m = Chem.MolFromSmiles(smiles)
@@ -237,7 +237,7 @@ for it in input_tokens:
 
 input_data = pids_to_dataframe(input_pids)
 
-#tfidf = col.checkbox(label="TFIDF", value=True)
+# tfidf = col.checkbox(label="TFIDF", value=True)
 tfidf = True
 
 if input_data.shape[0] == 0:
@@ -252,7 +252,6 @@ else:
     has_input = True
 
 if has_input:
-
     model = OnTheFlyModel()
     is_fitted = False
 
@@ -269,7 +268,7 @@ if has_input:
         clusters_of_proteins = [uniprot_inputs]
     else:
         graph = get_protein_graph(uniprot_inputs)
-        auroc_cut=0.7
+        auroc_cut = 0.7
         graph_key = "-".join(sorted(graph.nodes()))
         clusters_cache_file = os.path.join(
             root, "..", "cache", session_id + "_clusters.joblib"
@@ -287,7 +286,7 @@ if has_input:
             clusters_of_proteins = clusters_of_proteins["ok"]
             joblib.dump((graph_key, clusters_of_proteins), clusters_cache_file)
             old_clusters_cache_file = clusters_cache_file
-        
+
     col = cols[1]
 
     col.subheader(":robot_face: Quick modeling")
@@ -307,7 +306,7 @@ if has_input:
             options = [pid2name[clusters_of_proteins[0][0]]]
         else:
             options = ["Full set of proteins"]
-    
+
     selected_cluster = col.radio(
         "These are some suggested groups of proteins for modeling",
         options=options,
@@ -318,8 +317,6 @@ if has_input:
     else:
         selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
 
-    # default_max_hit_fragments = get_default_max_hit_fragments(selected_cluster)
-    # default_max_prom_fragments = get_default_max_prom_fragments(selected_cluster)
     default_max_hit_fragments = 100
     default_max_fragment_prom = 500
 
@@ -343,19 +340,19 @@ if has_input:
 
     uniprot_acs = list(selected_cluster)
 
-    data = HitSelectorByOverlap(uniprot_acs=uniprot_acs, tfidf=tfidf).select(max_hit_fragments=max_hit_fragments, max_fragment_promiscuity=max_fragment_prom)
+    data = HitSelectorByOverlap(uniprot_acs=uniprot_acs, tfidf=tfidf).select(
+        max_hit_fragments=max_hit_fragments, max_fragment_promiscuity=max_fragment_prom
+    )
 
     num_positives = len(data[data["y"] == 1])
     num_total = len(data[data["y"] != -1])
 
     subcols = col.columns(3)
-    subcols[0].metric(
-        "Positives", value=num_positives
-    )
+    subcols[0].metric("Positives", value=num_positives)
 
     subcols[1].metric("Total", value=num_total)
 
-    subcols[2].metric("Rate", value="{0:.1f}%".format(num_positives/num_total*100))
+    subcols[2].metric("Rate", value="{0:.1f}%".format(num_positives / num_total * 100))
 
     if num_positives == 0:
         col.error(
@@ -365,9 +362,16 @@ if has_input:
 
     else:
         task_evaluation = task_evaluator(model, data)
-        subcols[0].metric(label="Corr. other", value="{0:.3f}".format(task_evaluation["ref_rho"]))
-        subcols[1].metric(label="Frag. promiscuity", value="{0:.1f}".format(task_evaluation["prom"]))
-        subcols[2].metric(label="Interactors ({0})".format(len(uniprot_acs)), value="{0:.1f}".format(task_evaluation["hits"]))
+        subcols[0].metric(
+            label="Corr. other", value="{0:.3f}".format(task_evaluation["ref_rho"])
+        )
+        subcols[1].metric(
+            label="Frag. promiscuity", value="{0:.1f}".format(task_evaluation["prom"])
+        )
+        subcols[2].metric(
+            label="Interactors ({0})".format(len(uniprot_acs)),
+            value="{0:.1f}".format(task_evaluation["hits"]),
+        )
 
         expander = col.expander("View positives")
         positives_data = data[data["y"] == 1]
@@ -440,7 +444,10 @@ if has_input:
         if has_prediction_input:
             col.info(
                 "{0} out of {1} input molecules are valid. Of these, {2} had the CRF already, and for {3} of them it was automatically attached".format(
-                    len(smiles_list), len(pred_tokens), have_crf_count, attached_crf_count
+                    len(smiles_list),
+                    len(pred_tokens),
+                    have_crf_count,
+                    attached_crf_count,
                 )
             )
             do_tau = False
@@ -464,7 +471,13 @@ if has_input:
                     expander.image(get_fragment_image(v[0]))
             else:
                 y_hat = model.predict_proba(smiles_list)[:, 1]
-                dr = pd.DataFrame({"SMILES": smiles_list, "OriginalSMILES": original_smiles_list, "Score": y_hat})
+                dr = pd.DataFrame(
+                    {
+                        "SMILES": smiles_list,
+                        "OriginalSMILES": original_smiles_list,
+                        "Score": y_hat,
+                    }
+                )
                 for v in dr.values:
                     expander = col.expander(
                         "Score: `{0:.3f}` | SMILES: `{1}`".format(v[2], v[1])
@@ -476,5 +489,5 @@ if has_input:
                 label="Download results as CSV",
                 data=dr_.to_csv(),
                 file_name="prediction_output.csv",
-                mime="text/csv"
+                mime="text/csv",
             )

@@ -44,9 +44,13 @@ for uniprot_ac in tqdm(list(pid_prom.keys())):
 file_name = os.path.join(root, "..", "data", "protein_precalcs_baseline.joblib")
 joblib.dump(results, file_name)
 
-protein_precalcs_baseline = joblib.load(os.path.join("..", "data", "data/protein_precalcs_baseline.joblib"))
+protein_precalcs_baseline = joblib.load(
+    os.path.join(root, "..", "data", "protein_precalcs_baseline.joblib")
+)
 
-proteome_reference_predictions_file = os.path.join("..", "data", "proteome_reference_predictions_07.joblib")
+proteome_reference_predictions_file = os.path.join(
+    root, "..", "data", "proteome_reference_predictions_07.joblib"
+)
 
 proteome_reference_predictions = []
 for r in protein_precalcs_baseline:

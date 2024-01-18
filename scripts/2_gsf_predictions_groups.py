@@ -11,15 +11,23 @@ from rdkit.Chem import Descriptors
 root = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.append(os.path.join(root, "..", "src"))
-from model import OnTheFlyModel, HitSelectorByOverlap, CommunityDetector, task_evaluator, fragment_embedder
+from model import (
+    OnTheFlyModel,
+    HitSelectorByOverlap,
+    CommunityDetector,
+    task_evaluator,
+    fragment_embedder,
+)
 
 print("Getting list of SLCs")
+
 
 def load_hits():
     hits, fid_prom, pid_prom = joblib.load(
         os.path.join(root, "..", "data", "hits.joblib")
     )
     return hits, fid_prom, pid_prom
+
 
 def pid2name_mapper():
     df = pd.read_csv(
@@ -36,6 +44,7 @@ def pid2name_mapper():
         any2pid[r[1]] = r[0]
     return pid2name, name2pid, any2pid
 
+
 def pids_to_dataframe(pids):
     R = []
     for pid in pids:
@@ -47,6 +56,7 @@ def pids_to_dataframe(pids):
         .reset_index(drop=True)
     )
     return df
+
 
 pid2name, name2pid, any2pid = pid2name_mapper()
 hits, fid_prom, pid_prom = load_hits()
@@ -121,6 +131,7 @@ def get_protein_graph(uniprot_acs):
                         G[pid_0][pid_1]["weight"] = current_weight + 1
     return G
 
+
 uniprot_inputs = list(input_data["UniprotAC"])
 graph = get_protein_graph(uniprot_inputs)
 print(len(graph.nodes()))
@@ -192,8 +203,12 @@ for i, uniprot_acs in enumerate(clusters_of_proteins):
         for max_fragment_promiscuity in MAX_FRAGMENT_PROMISCUITY:
             print(iter_counts)
             iter_counts += 1
-            column = "clu{0}_{1}_{2}".format(i, max_hit_fragments, max_fragment_promiscuity)
-            data = HitSelectorByOverlap(uniprot_acs, tfidf=tfidf).select(max_hit_fragments, max_fragment_promiscuity)
+            column = "clu{0}_{1}_{2}".format(
+                i, max_hit_fragments, max_fragment_promiscuity
+            )
+            data = HitSelectorByOverlap(uniprot_acs, tfidf=tfidf).select(
+                max_hit_fragments, max_fragment_promiscuity
+            )
             task_evaluation = task_evaluator(model, data)
             if task_evaluation is None:
                 continue
@@ -209,10 +224,12 @@ dr = pd.DataFrame(R, columns=columns)
 df = pd.concat([df, dr], axis=1)
 
 df.to_csv(
-    os.path.join(root, "..", "results", "2_gsf_predictions_groups.tsv"), sep="\t", index=False
+    os.path.join(root, "..", "results", "2_gsf_predictions_groups.tsv"),
+    sep="\t",
+    index=False,
 )
 
 joblib.dump(
     columns_metadata,
-    os.path.join(root, "..", "results", "2_gsf_predictions_groups.metadata")
+    os.path.join(root, "..", "results", "2_gsf_predictions_groups.metadata"),
 )

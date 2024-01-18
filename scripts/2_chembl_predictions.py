@@ -38,7 +38,10 @@ for d in protein_precalcs:
 
 print("Loading molecules for prediction")
 df = pd.read_csv(
-    os.path.join(root, "..", "data", "chembl33_sample_20k_with_crf_{0}.csv".format(chembl_batch)), sep=","
+    os.path.join(
+        root, "..", "data", "chembl33_sample_20k_with_crf_{0}.csv".format(chembl_batch)
+    ),
+    sep=",",
 )
 
 R = []
@@ -54,7 +57,9 @@ for r in df[["smiles", "smiles_with_crf"]].values:
 print("Embeddings")
 df = pd.DataFrame(R, columns=["inchikey", "smiles"])
 
-ik2emb_file = os.path.join(root, "..", "data", "tmp_ik2emb_chembl_{0}.joblib".format(chembl_batch))
+ik2emb_file = os.path.join(
+    root, "..", "data", "tmp_ik2emb_chembl_{0}.joblib".format(chembl_batch)
+)
 if os.path.exists(ik2emb_file):
     ik2emb = joblib.load(ik2emb_file)
 else:
@@ -97,7 +102,9 @@ dr = pd.DataFrame(R, columns=slcs)
 df = pd.concat([df, dr], axis=1)
 
 df.to_csv(
-    os.path.join(root, "..", "results", "2_chembl_predictions_{0}.tsv".format(chembl_batch)),
+    os.path.join(
+        root, "..", "results", "2_chembl_predictions_{0}.tsv".format(chembl_batch)
+    ),
     sep="\t",
     index=False,
 )

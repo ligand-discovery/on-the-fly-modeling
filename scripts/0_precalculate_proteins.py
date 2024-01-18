@@ -8,7 +8,7 @@ root = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.append(os.path.join(root, "..", "src"))
 
-from model import precalc_embeddings, precalc_embeddings_reference, pid_prom
+from model import precalc_embeddings, pid_prom
 from model import OnTheFlyModel, HitSelector
 
 mdl = OnTheFlyModel()

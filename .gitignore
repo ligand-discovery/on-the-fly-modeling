@@ -1,4 +1,5 @@
 data/slc_inhibitor_collection_gsf.tsv
+data/slc_inhibitor_collection_gsf_with_auto_crf.tsv
 data/protein_precalcs_baseline.joblib
 results
 cache

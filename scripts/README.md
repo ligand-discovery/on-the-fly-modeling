@@ -1,0 +1,1 @@
+> Note: The files `slc_inhibitor_collection_gsf*.tsv` are excluded from version control using the `.gitignore` file. They are available in the `manuscript-revision` repository. If you need these files, please request them separately.

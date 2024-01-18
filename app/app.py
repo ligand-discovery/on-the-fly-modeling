@@ -226,7 +226,10 @@ col = cols[0]
 
 col.subheader(":mag: Input your proteins")
 
-text = col.text_area("Paste proteins separated by space or new line")
+text = col.text_area(
+    "Paste proteins in UniProt AC format or Gene Name.",
+    help="Write one protein per line. UniProt AC format is preferred. Only proteins available in the Ligand Discovery interactome will be considered.",
+)
 input_tokens = text.split()
 input_pids = []
 for it in input_tokens:
@@ -237,7 +240,6 @@ for it in input_tokens:
 
 input_data = pids_to_dataframe(input_pids)
 
-# tfidf = col.checkbox(label="TFIDF", value=True)
 tfidf = True
 
 if input_data.shape[0] == 0:
@@ -348,11 +350,23 @@ if has_input:
     num_total = len(data[data["y"] != -1])
 
     subcols = col.columns(3)
-    subcols[0].metric("Positives", value=num_positives)
+    subcols[0].metric(
+        "Positives",
+        value=num_positives,
+        help="Number of positive fragments (i.e. fragments that interact with at least one of the selected proteins). Fragments are ranked by their sum of TF-IDF scores, meaning that the fragments that interact with more proteins will be ranked higher. Interacting with specific proteins will also uprank fragments.",
+    )
 
-    subcols[1].metric("Total", value=num_total)
+    subcols[1].metric(
+        "Total",
+        value=num_total,
+        help="Total number of fragments (positive and negative) used in the model. This value decreases as you decrease the maximum promiscuity of included fragments threshold.",
+    )
 
-    subcols[2].metric("Rate", value="{0:.1f}%".format(num_positives / num_total * 100))
+    subcols[2].metric(
+        "Rate",
+        value="{0:.1f}%".format(num_positives / num_total * 100),
+        help="Ratio of positives to total fragments.",
+    )
 
     if num_positives == 0:
         col.error(
@@ -363,14 +377,19 @@ if has_input:
     else:
         task_evaluation = task_evaluator(model, data)
         subcols[0].metric(
-            label="Corr. other", value="{0:.3f}".format(task_evaluation["ref_rho"])
+            label="Corr. prom",
+            value="{0:.3f}".format(task_evaluation["ref_rho"]),
+            help="Correlation between model outcomes and fragment promiscuity predictors. If you wish to have models that are less correlated with promiscuity, consider lowering the maximum promiscuity of included fragments threshold.",
         )
         subcols[1].metric(
-            label="Frag. promiscuity", value="{0:.1f}".format(task_evaluation["prom"])
+            label="Frag. promiscuity",
+            value="{0:.1f}".format(task_evaluation["prom"]),
+            help="Average promiscuity of positive fragments. This helps understand how promiscuous the fragments are that are being used to build the model, with a focus on the positive class.",
         )
         subcols[2].metric(
             label="Interactors ({0})".format(len(uniprot_acs)),
             value="{0:.1f}".format(task_evaluation["hits"]),
+            help="Average number of query proteins that interact with positive fragments. If you want this number to be higher, consider decreasing the maximum number of positives threshold in order to focus on the fragments that have the highest protein coverage.",
         )
 
         expander = col.expander("View positives")
@@ -407,7 +426,8 @@ if has_input:
         col.subheader(":crystal_ball: Make predictions")
 
         input_prediction_tokens = col.text_area(
-            label="Input your SMILES of interest. They should have the diazirine fragment"
+            label="Input your SMILES of interest. Ideally, they should have the diazirine fragment",
+            help="Paste molecules in SMILES format, one per line. Try to include the CRF pattern in your input molecules. If no CRF pattern is present, it will be automatically attached.",
         )
 
         pred_tokens = [t for t in input_prediction_tokens.split("\n") if t != ""]

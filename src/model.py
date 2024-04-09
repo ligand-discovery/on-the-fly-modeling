@@ -34,8 +34,11 @@ catalog_ids, _, precalc_embeddings_reference = joblib.load(
 )
 hits, fid_prom, pid_prom = joblib.load(os.path.join(DATA_PATH, "hits.joblib"))
 
-
-tabpfn_model = TabPFNClassifier(device="cpu", N_ensemble_configurations=32)
+def load_tabpfn_classifier():
+    print("Loading TabPFN model")
+    if not 'tabpfn_model' in globals():
+        global tabpfn_model
+        tabpfn_model = TabPFNClassifier(device="cpu", N_ensemble_configurations=32)
 
 
 class BinaryBalancer(object):
@@ -164,9 +167,11 @@ class BaselineClassifierReducer(object):
 
 class LigandDiscoveryClassifier(object):
     def __init__(self):
-        tabpfn_model.remove_models_from_memory()
+        pass
 
     def fit(self, X, y, promiscuity_counts):
+        load_tabpfn_classifier()
+        tabpfn_model.remove_models_from_memory()
         n_components = int(min(np.sum(y), 100))
         self.reducer = LOL(n_components=n_components)
         self.balancer = BinaryBalancer(0.5)

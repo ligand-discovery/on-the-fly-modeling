@@ -3,6 +3,7 @@ import sys
 import streamlit as st
 import pandas as pd
 import joblib
+import time
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Draw
@@ -16,6 +17,24 @@ def get_session_id():
     if "session_id" not in st.session_state:
         st.session_state["session_id"] = str(uuid.uuid4())
     return st.session_state["session_id"]
+
+def clear_old_cache(cache_folder, hours=24):
+    # Define the directory to check
+    folder_path = '/path/to/your/folder'
+
+    # Get the current time
+    current_time = time.time()
+
+    # Loop through each file in the directory
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        # Check if it's a file (and not a directory)
+        if os.path.isfile(file_path):
+            # Get the last modified time and compare
+            file_modified_time = os.path.getmtime(file_path)
+            if current_time - file_modified_time > hours*3600: # 3600 seconds in an hour
+                print(f"Deleting {filename} as it is older than one day.")
+                os.remove(file_path) # Delete the file
 
 
 session_id = get_session_id()
@@ -34,6 +53,7 @@ from model import OnTheFlyModel, HitSelectorByOverlap, CommunityDetector, task_e
 cache_folder = os.path.join(root, "..", "cache")
 if not os.path.exists(cache_folder):
     os.mkdir(cache_folder)
+clear_old_cache(cache_folder, hours=24)
 
 old_clusters_cache_file = None
 
@@ -73,9 +93,10 @@ def load_protein_hit_similarity_matrix():
     return uniprot_acs, M, cutoffs
 
 
+print("Loading uniprot acs")
 global_uniprot_acs_0, M0, cutoffs_0 = load_protein_spearman_similarity_matrix()
 global_uniprot_acs_1, M1, cutoffs_1 = load_protein_hit_similarity_matrix()
-
+print("Done")
 
 @st.cache_data()
 def get_protein_graph(uniprot_acs):
@@ -254,9 +275,9 @@ else:
     has_input = True
 
 if has_input:
+    print("Instantiating on the fly model")
     model = OnTheFlyModel()
     is_fitted = False
-
     col.info(
         "{0} out of {1} input proteins were found in the Ligand Discovery interactome, corresponding to all statistically significant fragment-protein pairs.".format(
             len(input_pids), len(input_tokens)
@@ -267,6 +288,7 @@ if has_input:
 
     uniprot_inputs = list(input_data["UniprotAC"])
     if len(uniprot_inputs) == 1:
+        print("Only one protein")
         clusters_of_proteins = [uniprot_inputs]
     else:
         graph = get_protein_graph(uniprot_inputs)
@@ -319,6 +341,7 @@ if has_input:
     else:
         selected_cluster = [name2pid[n] for n in selected_cluster.split(", ")]
 
+    print("Cluster selection done")
     default_max_hit_fragments = 100
     default_max_fragment_prom = 500
 
@@ -345,6 +368,7 @@ if has_input:
     data = HitSelectorByOverlap(uniprot_acs=uniprot_acs, tfidf=tfidf).select(
         max_hit_fragments=max_hit_fragments, max_fragment_promiscuity=max_fragment_prom
     )
+    print("Selecting hits by overlap")
 
     num_positives = len(data[data["y"] == 1])
     num_total = len(data[data["y"] != -1])
@@ -391,6 +415,7 @@ if has_input:
             value="{0:.1f}".format(task_evaluation["hits"]),
             help="Average number of query proteins that interact with positive fragments. If you want this number to be higher, consider decreasing the maximum number of positives threshold in order to focus on the fragments that have the highest protein coverage.",
         )
+        print("Task evaluator done")
 
         expander = col.expander("View positives")
         positives_data = data[data["y"] == 1]
@@ -417,10 +442,9 @@ if has_input:
             )
             subcols = col.columns(3)
 
-        model.fit(data["y"])
-        is_fitted = True
+        is_ready = True
 
-    if is_fitted:
+    if is_ready:
         col = cols[2]
 
         col.subheader(":crystal_ball: Make predictions")
@@ -462,6 +486,8 @@ if has_input:
             has_prediction_input = True
 
         if has_prediction_input:
+            model.fit(data["y"])
+
             col.info(
                 "{0} out of {1} input molecules are valid. Of these, {2} had the CRF already, and for {3} of them it was automatically attached".format(
                     len(smiles_list),
@@ -511,3 +537,4 @@ if has_input:
                 file_name="prediction_output.csv",
                 mime="text/csv",
             )
+            del model

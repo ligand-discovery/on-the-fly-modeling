@@ -20,7 +20,7 @@ def get_session_id():
 
 def clear_old_cache(cache_folder, hours=24):
     # Define the directory to check
-    folder_path = '/path/to/your/folder'
+    folder_path = cache_folder
 
     # Get the current time
     current_time = time.time()

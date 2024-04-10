@@ -28,6 +28,9 @@ pip install -e fragment-embedding/.
 
 # install combine mols
 pip install CombineMols
+
+# Finally clone this repo
+https://github.com/ligand-discovery/on-the-fly-modeling.git
 ```
 
 ## Usage

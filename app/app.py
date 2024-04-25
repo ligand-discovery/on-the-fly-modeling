@@ -43,7 +43,12 @@ RDLogger.DisableLog("rdApp.*")
 
 import networkx as nx
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="On the Fly Modeling from Ligand Discovery",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    page_icon=None,
+)
 
 root = os.path.dirname(os.path.abspath(__file__))
 
@@ -248,7 +253,7 @@ col = cols[0]
 col.subheader(":mag: Input your proteins")
 
 text = col.text_area(
-    "Paste proteins in UniProt AC format or Gene Name.",
+    "Paste proteins in UniProt AC format or Gene Name. For example, you can query VDAC2.",
     help="Write one protein per line. UniProt AC format is preferred. Only proteins available in the Ligand Discovery interactome will be considered.",
 )
 input_tokens = text.split()
@@ -453,6 +458,9 @@ if has_input:
             label="Input your SMILES of interest. Ideally, they should have the diazirine fragment",
             help="Paste molecules in SMILES format, one per line. Try to include the CRF pattern in your input molecules. If no CRF pattern is present, it will be automatically attached.",
         )
+
+        col.markdown("Below you can find a few suggested molecules to try out:")
+        col.text("\n".join(pos_smis[:2] + neg_smis[:2]))
 
         pred_tokens = [t for t in input_prediction_tokens.split("\n") if t != ""]
 
